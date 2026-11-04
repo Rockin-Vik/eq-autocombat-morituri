@@ -185,7 +185,7 @@ local MODES = {
         ['Assist:Backline'] = 'Ranged/caster support; assists MA without moving to melee range.',
         ['Boss:DPS']        = 'Kills adds first, then the boss once it is at the engage HP. Fights from behind the target.',
         ['Boss:Tank']       = 'Grabs loose adds first, faces its target and backs up so no mob is hitting it from behind.',
-        ['Boss:Burn']       = 'Ignores adds and goes straight for the boss once it is at the engage HP, with Burn turned on. Fights adds only while no boss is in the area.',
+        ['Boss:Burn']       = 'Solo boss fights: ignores adds and goes straight for the boss, with Burn turned on. Target the boss to open. Fights adds only while no boss is in the area.',
     },
 }
 
@@ -13060,12 +13060,14 @@ function UI.drawControlTab()
         ImGui.Spacing()
 
         if ctrl.submode ~= 'Tank' then
-            UI.formLabel('Join the boss at HP')
-            ctrl.boss_engage_at = ImGui.SliderInt('##bossEngageAt', tonumber(ctrl.boss_engage_at) or 98, 1, 100, '%d%%')
-            if ImGui.IsItemHovered() then
-                UI.setTooltip(ctrl.submode == 'Burn'
-                    and 'Waits for the tank until the boss is at or below this, then burns it. Adds are ignored while a boss is in the area.'
-                    or 'DPS waits for the tank until the boss is at or below this. Adds are attacked straight away.')
+            if ctrl.submode ~= 'Burn' then
+                UI.formLabel('Join the boss at HP')
+                ctrl.boss_engage_at = ImGui.SliderInt('##bossEngageAt', tonumber(ctrl.boss_engage_at) or 98, 1, 100, '%d%%')
+                if ImGui.IsItemHovered() then
+                    UI.setTooltip('DPS waits for the tank until the boss is at or below this. Adds are attacked straight away.')
+                end
+            else
+                accent(MUTED, 'Goes straight for the boss and ignores adds. Target the boss to open the fight.')
             end
             local behindVal = ImGui.Checkbox('Fight from behind the target##bossBehind', ctrl.boss_behind ~= false)
             if behindVal ~= (ctrl.boss_behind ~= false) then
@@ -22559,8 +22561,9 @@ end
 --   Adds: the lowest HP one, so every box converges on the same add; the
 --         current add is kept unless another is `sticky` points lower.
 --   Boss: once no adds are left. DPS waits until it is at opts.engageAt.
---   opts.burn: adds are ignored while a boss is in the area (still waiting
---         for the engage HP); with no boss, adds are fought as in DPS.
+--   opts.burn: adds are ignored while a boss is in the area and the boss is
+--         fought at once (no engage HP: solo, there is no tank to wait for);
+--         with no boss, adds are fought as in DPS.
 function runtime.bossChoose(cands, curId, opts)
     opts = opts or {}
     local sticky = opts.sticky or 10
@@ -22596,10 +22599,7 @@ function runtime.bossChoose(cands, curId, opts)
         local l = loosest(adds) or loosest(bosses)
         if l then return l.id, 'loose', bossId end
     end
-    if opts.burn and boss then
-        if boss.hp <= (opts.engageAt or 100) then return boss.id, 'boss', bossId end
-        return nil, 'wait', bossId
-    end
+    if opts.burn and boss then return boss.id, 'boss', bossId end
     if #adds > 0 then
         local best = lowest(adds)
         local cur = find(adds, curId)
@@ -22708,7 +22708,7 @@ end
 
 -- Engaged hostiles inside the fight area: XTarget haters, mobs the raid is
 -- fighting that are not on our XTarget (a 1 s spawn sweep), and for a tank
--- whatever the player targeted, so it can open on the boss.
+-- or Burn (often solo) whatever the player targeted, so it can open on the boss.
 function runtime.bossCandidates()
     local out = {}
     local anchor = runtime.bossAnchor()
@@ -22761,7 +22761,7 @@ function runtime.bossCandidates()
         runtime.bossSweep = sw
     end
     for _, sid in ipairs(sw.ids) do add(sid, runtime.playerHasAggro(sid)) end
-    if ctrl.submode == 'Tank' and curId > 0 then add(curId, runtime.playerHasAggro(curId)) end
+    if (ctrl.submode == 'Tank' or ctrl.submode == 'Burn') and curId > 0 then add(curId, runtime.playerHasAggro(curId)) end
     return out
 end
 
