@@ -1,11 +1,11 @@
 # MoriAC update manifest, written by dev/publish.sh. Read by lua/tac/update_check.lua.
-version=2026.11.04.0327
+version=2026.11.04.0334
 date=2026-11-04
-commit=b40edf3
+commit=9b6bf4b
 file=config/moriac_alarm.wav 52962 7ab5ae2a
 file=config/moriac_data.lua 134672 978ddc7a
 file=lua/mac.lua 310 089d668c
-file=lua/moriac.lua 1226217 5051de49
+file=lua/moriac.lua 1227506 c2132129
 file=lua/tac/alerts.lua 24590 4c48e914
 file=lua/tac/auto_aa.lua 163494 88097c8c
 file=lua/tac/auto_accept.lua 30602 0c1987dd
@@ -35,6 +35,8 @@ file=lua/tac/tradeskill.lua 40899 ab8cb26d
 file=lua/tac/triune_log.lua 15583 576465e8
 file=lua/tac/update_check.lua 48330 7ad20a59
 note=## 2026-11-04
+note=
+note=- **Puller (Hunt) no longer ignores mobs while you're levitating.** Levitate keeps you hovering above the navmesh, and from there the nav plugin finds no path to any mob. Every mob was dropped as unreachable without a message, so Hunt stood next to mobs in reach until levitate came off. The same-floor height setting couldn't help, because it wasn't the height check. Now, while you're levitating, a mob with no nav path is still picked: it's ranked by straight-line distance, and mobs you can't see rank lower. MoriAC walks straight at it and goes back to nav once you're on the mesh. Chat says so once per levitate. This applies to Camp and Lure pulls too.
 note=
 note=- **New Boss - Burn mode: ignore the adds and burn the boss.** Pick **Boss / Burn** in the command bar, or type `/ac boss burn`. It's meant for solo boss kills. It uses the same fight area and boss names as Boss - DPS, but doesn't wait for a tank (there's no *Join the boss at HP*): while a boss is in the area it leaves the adds alone and goes straight for the boss. Target the boss and it opens the fight, the way Boss - Tank does. Once it's on the boss it turns **Burn** on, so your *Burn Only* lines fire. It does this once per boss, so if you turn Burn off by hand it stays off, and as usual Burn goes off by itself when your extended target clears. With no boss in the area (trash before the boss, or after it dies) it fights adds the way Boss - DPS does. Fight from behind applies too. The Boss fight card shows "Adds: N (ignored)" while this is happening.
 note=

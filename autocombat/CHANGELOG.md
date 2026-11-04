@@ -4,6 +4,8 @@
 
 ## 2026-11-04
 
+- **Puller (Hunt) no longer ignores mobs while you're levitating.** Levitate keeps you hovering above the navmesh, and from there the nav plugin finds no path to any mob. Every mob was dropped as unreachable without a message, so Hunt stood next to mobs in reach until levitate came off. The same-floor height setting couldn't help, because it wasn't the height check. Now, while you're levitating, a mob with no nav path is still picked: it's ranked by straight-line distance, and mobs you can't see rank lower. MoriAC walks straight at it and goes back to nav once you're on the mesh. Chat says so once per levitate. This applies to Camp and Lure pulls too.
+
 - **New Boss - Burn mode: ignore the adds and burn the boss.** Pick **Boss / Burn** in the command bar, or type `/ac boss burn`. It's meant for solo boss kills. It uses the same fight area and boss names as Boss - DPS, but doesn't wait for a tank (there's no *Join the boss at HP*): while a boss is in the area it leaves the adds alone and goes straight for the boss. Target the boss and it opens the fight, the way Boss - Tank does. Once it's on the boss it turns **Burn** on, so your *Burn Only* lines fire. It does this once per boss, so if you turn Burn off by hand it stays off, and as usual Burn goes off by itself when your extended target clears. With no boss in the area (trash before the boss, or after it dies) it fights adds the way Boss - DPS does. Fight from behind applies too. The Boss fight card shows "Adds: N (ignored)" while this is happening.
 
 ## 2026-10-31

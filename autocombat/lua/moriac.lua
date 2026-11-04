@@ -23104,6 +23104,15 @@ function runtime.findRoamTarget(searchRadius, searchMaxZ, minLevel, maxLevel, fr
         runtime.pathExistsCache[sid] = { at = nowScan, ok = ok, v = v }
         return ok, v
     end
+    -- Levitating hovers us above the navmesh, so MQ2Nav can find no path to
+    -- any mob from where we float and every candidate was dropped without a
+    -- word: Hunt stood still next to mobs until levitate came off. While
+    -- levitating, a no-path mob stays a candidate (ranked by straight line,
+    -- one out of sight ranked lower); moveToward sticks toward it and remaps
+    -- /nav once we are back on the mesh.
+    local levitating = false
+    pcall(function() levitating = mq.TLO.Me.Levitating() == true end)
+    local levNoPath = false
 
     -- How a candidate is ranked: walking distance (the navmesh path length)
     -- from us, or in Camp/Lure from the camp once we're away from it (a
@@ -23183,7 +23192,12 @@ function runtime.findRoamTarget(searchRadius, searchMaxZ, minLevel, maxLevel, fr
                                                 local closeReach = desiredRange(sid) or 14
                                                 if dist > closeReach or not hasLoS(sid) then
                                                     local ok, hasPath = pathExists(sid)
-                                                    if ok and not hasPath then
+                                                    if ok and not hasPath and levitating then
+                                                        levNoPath = true
+                                                        if not hasLoS(sid) then
+                                                            walk = walk * C.OFF_FLOOR_MULT + C.OFF_FLOOR_ADD
+                                                        end
+                                                    elseif ok and not hasPath then
                                                         pathOk = false
                                                         noPath.count = noPath.count + 1
                                                         if noPath.id == 0 then
@@ -23226,6 +23240,12 @@ function runtime.findRoamTarget(searchRadius, searchMaxZ, minLevel, maxLevel, fr
     end
 
     local targetId = scanSpawns()
+    if targetId and levNoPath and not runtime.levNoPathNoted then
+        runtime.levNoPathNoted = true
+        print('\ay[MoriAC]\ax Levitating: no nav path from up here, so mobs are picked by straight-line distance until levitate drops.')
+    elseif not levitating then
+        runtime.levNoPathNoted = nil
+    end
     if targetId then runtime.noteMeshPathOk(); return targetId end
 
     if noPath.count > 0 then
