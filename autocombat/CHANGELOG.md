@@ -2,6 +2,10 @@
 
 > **Morituri Auto Combat (MoriAC)** is a fork of Triune AutoCombat for Project Morituri. Entries above the upstream `2026-10-11` section are fork changes; everything below them is upstream history.
 
+## 2026-11-04
+
+- **New Boss - Burn mode: ignore the adds and burn the boss.** Pick **Boss / Burn** in the command bar, or type `/ac boss burn`. It uses the same fight area, boss names and *Join the boss at HP* as Boss - DPS, but while a boss is in the area it leaves the adds alone and goes straight for the boss. Set *Join the boss at HP* to 100 to open on the boss right away. Once it's on the boss it turns **Burn** on, so your *Burn Only* lines fire. It does this once per boss, so if you turn Burn off by hand it stays off, and as usual Burn goes off by itself when your extended target clears. With no boss in the area (trash before the boss, or after it dies) it fights adds the way Boss - DPS does. Fight from behind applies too. The Boss fight card shows "Adds: N (ignored)" while this is happening.
+
 ## 2026-10-31
 
 - **The puller kills everything at camp before the next pull when you're solo.** A mob standing next to you could be left hitting you while the puller ran out for another. The step that picks up mobs already on your extended target skips any it has marked unreachable (after a few "You cannot see your target" retries, or 15 s without reaching it), any outside the height filter and any past the chase range. Now in Camp and Lure, before going out, MoriAC checks your extended target. A mob within 40 units is targeted and fought, even one marked unreachable. A mob further out holds the next pull for up to 20 s in case it walks in. **Clear camp first** on the **Pulling** card sets when this applies: **Solo** (the default: only when you're not in a group, so nobody else is there to tank), **Always**, or **Off**. Mobs on your ignore list don't count.

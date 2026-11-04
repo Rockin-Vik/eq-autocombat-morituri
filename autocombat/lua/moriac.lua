@@ -163,7 +163,7 @@ local MODES = {
     SUBMODES      = {
         Puller = { 'Hunt', 'Camp', 'Lure' },
         Assist = { 'Chase', 'Camp', 'Backline' },
-        Boss   = { 'DPS', 'Tank' },
+        Boss   = { 'DPS', 'Tank', 'Burn' },
     },
     PULL_STYLES   = { 'Melee', 'Spell', 'Pet', 'Ranged' },
     PULL_CON_LIST = {
@@ -174,7 +174,7 @@ local MODES = {
         Manual = 'Fights your current or acquired target automatically. Does not roam.',
         Puller = 'Pulling & hunting engine. Hunt roams and solo-kills; Camp pulls mobs back to set camp; Lure tags from range and waits at camp for the mob.',
         Assist = 'Assists the Main Assist. Chase follows MA; Camp holds camp spot; Backline is ranged/caster support.',
-        Boss   = 'Raid boss fights. Only fights engaged mobs inside the fight area, kills adds before the boss, and never leaves the area.',
+        Boss   = 'Raid boss fights. Only fights engaged mobs inside the fight area and never leaves the area. DPS and Tank kill adds before the boss; Burn ignores them.',
     },
     SUB_DESC      = {
         ['Puller:Hunt']     = 'Roams within search radius looking for valid mobs and kills them on the spot.',
@@ -185,6 +185,7 @@ local MODES = {
         ['Assist:Backline'] = 'Ranged/caster support; assists MA without moving to melee range.',
         ['Boss:DPS']        = 'Kills adds first, then the boss once it is at the engage HP. Fights from behind the target.',
         ['Boss:Tank']       = 'Grabs loose adds first, faces its target and backs up so no mob is hitting it from behind.',
+        ['Boss:Burn']       = 'Ignores adds and goes straight for the boss once it is at the engage HP, with Burn turned on. Fights adds only while no boss is in the area.',
     },
 }
 
@@ -233,7 +234,7 @@ local function sanitizeModeConfig(c)
     elseif c.mode == 'Assist' then
         if c.submode ~= 'Chase' and c.submode ~= 'Camp' and c.submode ~= 'Backline' then c.submode = 'Chase' end
     elseif c.mode == 'Boss' then
-        if c.submode ~= 'DPS' and c.submode ~= 'Tank' then c.submode = 'DPS' end
+        if c.submode ~= 'DPS' and c.submode ~= 'Tank' and c.submode ~= 'Burn' then c.submode = 'DPS' end
     else
         c.submode = 'Hunt'
     end
@@ -9292,7 +9293,7 @@ UI.HELP_COMMANDS = (function() return {
         { cmd = '/ac zplane [5-100]',                 desc = 'Configure Hunter Tier 1 same-floor / Z plane height threshold (default 15)' },
         { cmd = '/ac huntz [10-300]',                 desc = 'Configure Hunter Tier 2 max vertical height difference (default 75)' },
         { cmd = '/ac <mode> [submode]',               desc = 'Switch combat mode (e.g. /ac manual, /ac puller hunt, /ac puller camp, /ac puller lure, /ac assist chase, /ac backline, /ac tank)' },
-        { cmd = '/ac boss [dps|tank]',                desc = 'Boss mode: fight only engaged mobs inside the fight area, adds before the boss (DPS fights from behind; Tank keeps mobs in front)' },
+        { cmd = '/ac boss [dps|tank|burn]',           desc = 'Boss mode: fight only engaged mobs inside the fight area, adds before the boss (DPS fights from behind; Tank keeps mobs in front; Burn ignores adds and burns the boss)' },
         { cmd = '/ac bossname [target|clear|<names>]', desc = 'Boss mode: set the boss names (comma-separated), add your target\'s name, or clear (any named mob is the boss)' },
         { cmd = '/ac ma [target|clear|<name>|<id>]',  desc = 'Configure Main Assist by player ID or name, or set from current PC target' },
         { cmd = '/ac style [melee|ranged|spell]',     desc = 'Set combat style: Melee (/attack at melee reach), Ranged (bow via server #attackmode), or Spell (never auto-attacks)' },
@@ -13062,7 +13063,9 @@ function UI.drawControlTab()
             UI.formLabel('Join the boss at HP')
             ctrl.boss_engage_at = ImGui.SliderInt('##bossEngageAt', tonumber(ctrl.boss_engage_at) or 98, 1, 100, '%d%%')
             if ImGui.IsItemHovered() then
-                UI.setTooltip('DPS waits for the tank until the boss is at or below this. Adds are attacked straight away.')
+                UI.setTooltip(ctrl.submode == 'Burn'
+                    and 'Waits for the tank until the boss is at or below this, then burns it. Adds are ignored while a boss is in the area.'
+                    or 'DPS waits for the tank until the boss is at or below this. Adds are attacked straight away.')
             end
             local behindVal = ImGui.Checkbox('Fight from behind the target##bossBehind', ctrl.boss_behind ~= false)
             if behindVal ~= (ctrl.boss_behind ~= false) then
@@ -13092,7 +13095,8 @@ function UI.drawControlTab()
                 accent(MUTED, 'Boss: none engaged in the area')
             end
             ImGui.SameLine()
-            accent(bs.adds > 0 and WARN or MUTED, string.format('Adds: %d', bs.adds))
+            local addsIgnored = (ctrl.submode == 'Burn' and bs.bossId) and ' (ignored)' or ''
+            accent(bs.adds > 0 and WARN or MUTED, string.format('Adds: %d%s', bs.adds, addsIgnored))
             if bs.why == 'wait' then
                 accent(MUTED, string.format('Waiting for the boss to reach %d%%.', tonumber(ctrl.boss_engage_at) or 98))
             elseif bs.pick then
@@ -22514,7 +22518,8 @@ end
 -- started when no camp is set), so a second boss across the room is left
 -- alone. Adds die before the boss. DPS waits for the boss to reach
 -- ctrl.boss_engage_at and fights from behind; Tank grabs loose mobs first,
--- faces its target and backs up so nothing hits it from behind.
+-- faces its target and backs up so nothing hits it from behind. Burn is DPS
+-- that ignores adds while a boss is in the area and turns Burn on for it.
 -- ============================================================================
 
 -- "Lord Vyemm, Aten Ha Ra" -> { 'lord vyemm', 'aten ha ra' }
@@ -22554,6 +22559,8 @@ end
 --   Adds: the lowest HP one, so every box converges on the same add; the
 --         current add is kept unless another is `sticky` points lower.
 --   Boss: once no adds are left. DPS waits until it is at opts.engageAt.
+--   opts.burn: adds are ignored while a boss is in the area (still waiting
+--         for the engage HP); with no boss, adds are fought as in DPS.
 function runtime.bossChoose(cands, curId, opts)
     opts = opts or {}
     local sticky = opts.sticky or 10
@@ -22588,6 +22595,10 @@ function runtime.bossChoose(cands, curId, opts)
     if opts.tank then
         local l = loosest(adds) or loosest(bosses)
         if l then return l.id, 'loose', bossId end
+    end
+    if opts.burn and boss then
+        if boss.hp <= (opts.engageAt or 100) then return boss.id, 'boss', bossId end
+        return nil, 'wait', bossId
     end
     if #adds > 0 then
         local best = lowest(adds)
@@ -22670,6 +22681,7 @@ function runtime.bossReset()
     runtime.bossMoveUntil = 0
     runtime.bossIdleSince = nil
     runtime.bossLastPick = nil
+    runtime.bossBurnedId = nil
 end
 
 -- Centre of the fight area: the camp spot, else where Boss mode started.
@@ -22760,7 +22772,8 @@ function runtime.bossTick()
     local curId = 0
     pcall(function() curId = mq.TLO.Target.ID() or 0 end)
     local id, why, bossId = runtime.bossChoose(cands, curId, {
-        tank = (ctrl.submode == 'Tank'), engageAt = tonumber(ctrl.boss_engage_at) or 98, sticky = 10,
+        tank = (ctrl.submode == 'Tank'), burn = (ctrl.submode == 'Burn'),
+        engageAt = tonumber(ctrl.boss_engage_at) or 98, sticky = 10,
     })
     local st = { why = why, pick = id, bossId = bossId, adds = 0 }
     for _, c in ipairs(cands) do
@@ -22777,6 +22790,15 @@ function runtime.bossTick()
         print(string.format('\ag[MoriAC]\ax Boss: %s %s (#%d).', what, tostring(st.pickName or '?'), id))
     end
     runtime.bossLastPick = id
+    -- Boss (Burn): turn Burn on once per boss, so switching it off by hand
+    -- mid-fight sticks. It goes off by itself when XTarget clears.
+    if ctrl.submode == 'Burn' and why == 'boss' and id and runtime.bossBurnedId ~= id then
+        runtime.bossBurnedId = id
+        if not ctrl.burn then
+            ctrl.burn = true
+            print(string.format('\ag[MoriAC]\ax Boss: Burn mode ENABLED on %s.', tostring(st.pickName or '?')))
+        end
+    end
     return id
 end
 
@@ -25957,6 +25979,8 @@ local function setTriuneMode(arg1, arg2)
             newSubmode = 'Tank'
         elseif k2 == 'dps' then
             newSubmode = 'DPS'
+        elseif k2 == 'burn' then
+            newSubmode = 'Burn'
         else
             newSubmode = (ctrl.mode == 'Boss' and ctrl.submode) or 'DPS'
         end

@@ -64,6 +64,7 @@ MoriAC opens by itself when you log in. If you close it, type `/ac` or `/lua run
 | **Assist - Backline** | Boxed healers and casters | Stays at range and never runs into melee. |
 | **Boss - DPS** | Raid boss fights | Fights only mobs that are already engaged and inside the fight area, so a second boss across the room is left alone. Kills adds first (lowest HP, so every box hits the same one), then joins on the boss at *Join the boss at HP* (default 98%). Fights from behind the target, and casters and bow users walk round behind it too. Walks back to the area centre when idle. |
 | **Boss - Tank** | Your tank in a boss fight | Same fight area. Picks up mobs that are not on it first, faces its target, and steps aside when a mob on it is hitting its back, so everything is in front. |
+| **Boss - Burn** | Adds don't matter, the boss does | Like Boss - DPS, but ignores the adds and goes straight for the boss at *Join the boss at HP* (set it to 100 to open on it), and turns Burn on so your *Burn Only* lines fire. Adds are only fought while no boss is in the area. |
 
 Set the Main Assist with `/ac ma <name>` or on the **Mode & Pulling** page.
 
@@ -126,7 +127,7 @@ Type `/ac help` in game for the full list.
 | `/ac` | Start or pause |
 | `/moriac ...` | Same as `/ac ...` (`/triune ...` also still works) |
 | `/ac run` / `/ac pause` | Start / pause |
-| `/ac manual`, `/ac puller camp`, `/ac puller lure`, `/ac puller hunt`, `/ac assist chase`, `/ac assist camp`, `/ac backline`, `/ac boss dps`, `/ac boss tank` | Switch mode |
+| `/ac manual`, `/ac puller camp`, `/ac puller lure`, `/ac puller hunt`, `/ac assist chase`, `/ac assist camp`, `/ac backline`, `/ac boss dps`, `/ac boss tank`, `/ac boss burn` | Switch mode |
 | `/ac bossname [target\|clear\|<names>]` | Boss mode: set the boss names (comma-separated), add your target's name, or clear them |
 | `/ac ma <name>` | Set the Main Assist |
 | `/ac burn` | Toggle Burn mode |
