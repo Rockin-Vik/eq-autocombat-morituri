@@ -2,6 +2,10 @@
 
 > **Morituri Auto Combat (MoriAC)** is a fork of Triune AutoCombat for Project Morituri. Entries above the upstream `2026-10-11` section are fork changes; everything below them is upstream history.
 
+## 2026-11-05
+
+- **Alerts ding again by default (`lua/tac/alerts.lua` 1.2.0).** Players found the built-in alarm too much. Enrage, Rampage and Summoned now use the simple ding (`/beep`) again, and so do new triggers. Existing settings move back too: if one of those three is on the alarm, it switches to the ding when you update. Your own triggers and any `.wav` file you picked stay as they are. To keep the alarm, pick **Alarm (loud, built in)** as the trigger's sound in Setup -> Plugins -> Alerts again after updating.
+
 ## 2026-11-04
 
 - **Puller (Hunt) no longer ignores mobs while you're levitating.** Levitate keeps you hovering above the navmesh, and from there the nav plugin finds no path to any mob. Every mob was dropped as unreachable without a message, so Hunt stood next to mobs in reach until levitate came off. The same-floor height setting couldn't help, because it wasn't the height check. Now, while you're levitating, a mob with no nav path is still picked: it's ranked by straight-line distance, and mobs you can't see rank lower. MoriAC walks straight at it and goes back to nav once you're on the mesh. Chat says so once per levitate. This applies to Camp and Lure pulls too.

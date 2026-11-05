@@ -5,8 +5,9 @@
 -- Audio / on-screen alerts. Each trigger watches either a chat line (an
 -- mq.event pattern, e.g. "#1# has become ENRAGED.") or your own HP / mana
 -- dropping below a threshold, and when it fires it:
---   * plays a sound: the built-in alarm (config/moriac_alarm.wav, made by
---     dev/make_alarm_wav.py), a .wav file the trigger names, or /beep,
+--   * plays a sound: /beep (the default), the built-in alarm
+--     (config/moriac_alarm.wav, made by dev/make_alarm_wav.py) or a .wav
+--     file the trigger names,
 --   * flashes the alert text at the top of the screen for a few seconds,
 --   * echoes it to chat.
 --
@@ -22,7 +23,7 @@
 local plugin = {
     id                 = 'alerts',
     name               = 'Alerts',
-    version            = '1.1.0',
+    version            = '1.2.0',
     author             = 'MoriAC',
     description        = 'Sound and on-screen alerts for chat lines (enrage, rampage, summon, your own text) and for low HP or mana.',
     defaultEnabled     = true,
@@ -44,9 +45,15 @@ local ALARM        = 'alarm'
 local ALARM_FILE   = 'moriac_alarm.wav'   -- in config/, so the updater ships it
 local SOUND_MODES  = { 'alarm', 'beep', 'file' }
 local SOUND_LABEL  = { alarm = 'Alarm (loud, built in)', beep = 'Beep (quiet)', file = 'Sound file (.wav)' }
--- Saved settings older than this get the built-in alarm on their default
--- Enrage / Rampage / Summoned triggers (they used to beep).
-local SOUND_VERSION = 2
+-- 1.1.0 (sound version 2) put the built-in alarm on the default Enrage /
+-- Rampage / Summoned triggers; players found it too much, so 1.2.0 (version
+-- 3) moves those three back to /beep on load. Other triggers are untouched.
+local SOUND_VERSION = 3
+local LOUD_DEFAULTS = {
+    ['#1# has become ENRAGED.#*#'] = true,
+    ['#1# goes on a RAMPAGE!#*#']  = true,
+    ['You have been summoned!#*#'] = true,
+}
 
 local core  = nil
 local mq    = nil
@@ -54,9 +61,9 @@ local ImGui = nil
 
 local function defaultTriggers()
     return {
-        { name = 'Enrage',   kind = 'chat', pattern = '#1# has become ENRAGED.#*#', enabled = true,  sound = ALARM, when = 'always', cooldown = 5,  flash = true },
-        { name = 'Rampage',  kind = 'chat', pattern = '#1# goes on a RAMPAGE!#*#',  enabled = true,  sound = ALARM, when = 'always', cooldown = 10, flash = true },
-        { name = 'Summoned', kind = 'chat', pattern = 'You have been summoned!#*#', enabled = true,  sound = ALARM, when = 'always', cooldown = 5,  flash = true },
+        { name = 'Enrage',   kind = 'chat', pattern = '#1# has become ENRAGED.#*#', enabled = true,  sound = '',    when = 'always', cooldown = 5,  flash = true },
+        { name = 'Rampage',  kind = 'chat', pattern = '#1# goes on a RAMPAGE!#*#',  enabled = true,  sound = '',    when = 'always', cooldown = 10, flash = true },
+        { name = 'Summoned', kind = 'chat', pattern = 'You have been summoned!#*#', enabled = true,  sound = '',    when = 'always', cooldown = 5,  flash = true },
         { name = 'Tell',     kind = 'chat', pattern = '#1# tells you, #*#',         enabled = false, sound = '', when = 'always', cooldown = 10, flash = false },
         { name = 'Low HP',   kind = 'hp',   threshold = 35,                         enabled = false, sound = '', when = 'always', cooldown = 15, flash = true },
     }
@@ -370,15 +377,12 @@ function plugin.onLoadSettings(s)
             if clean and #list < MAX_TRIGGERS then list[#list + 1] = clean end
         end
         cfg.triggers = list
-        -- Before 1.1.0 every default trigger beeped: move the loud defaults
-        -- to the built-in alarm unless the player picked a sound of their own.
+        -- Saves from 1.1.0 have the alarm on the default Enrage / Rampage /
+        -- Summoned triggers (by default, or moved there from the beep):
+        -- put them back on the ding. A .wav file of the player's own stays.
         if (tonumber(s.soundVersion) or 1) < SOUND_VERSION then
-            local loud = {}
-            for _, d in ipairs(defaultTriggers()) do
-                if d.sound == ALARM then loud[d.pattern] = true end
-            end
             for _, t in ipairs(list) do
-                if t.sound == '' and t.kind == 'chat' and loud[t.pattern] then t.sound = ALARM end
+                if t.sound == ALARM and t.kind == 'chat' and LOUD_DEFAULTS[t.pattern] then t.sound = '' end
             end
         end
     end
@@ -513,7 +517,7 @@ function plugin.onDrawSettings()
         if pressed then st.selected = i end
     end
     if #cfg.triggers < MAX_TRIGGERS and ImGui.Button('Add Trigger##alrAdd', core.px(110), core.px(22)) then
-        cfg.triggers[#cfg.triggers + 1] = sanitizeTrigger({ name = 'New alert', kind = 'chat', pattern = '', sound = ALARM })
+        cfg.triggers[#cfg.triggers + 1] = sanitizeTrigger({ name = 'New alert', kind = 'chat', pattern = '', sound = '' })
         st.selected = #cfg.triggers
         markDirty()
     end
