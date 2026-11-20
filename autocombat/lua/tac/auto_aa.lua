@@ -1587,12 +1587,14 @@ function AA.classIndex()
             for _, cls in ipairs(type(list) == 'table' and list or {}) do add(nm, cls) end
         end
     end
-    if DATA and type(DATA.aas) == 'table' then
-        for cls, list in pairs(DATA.aas) do
-            for _, item in ipairs(list) do
-                local nm = type(item) == 'table' and item[1] or item
-                add(nm, cls)
-                if type(nm) == 'string' then act[nm] = true end
+    for _, src in ipairs({ DATA and DATA.aas, DATA and DATA.aas_extra }) do
+        if type(src) == 'table' then
+            for cls, list in pairs(src) do
+                for _, item in ipairs(list) do
+                    local nm = type(item) == 'table' and item[1] or item
+                    add(nm, cls)
+                    if type(nm) == 'string' then act[nm] = true end
+                end
             end
         end
     end

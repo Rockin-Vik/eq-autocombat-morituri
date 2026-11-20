@@ -10422,14 +10422,18 @@ function UI.drawAATab()
                 local out = {}
                 for _, tier in ipairs({ 'short', 'mid', 'burn' }) do
                     for _, cls in ipairs(myClasses) do
-                        for sec, list in pairs(DATA.aas[cls] or {}) do
+                      -- aas_extra: AAs the data file only knows from the base
+                      -- (NMS) tables, listed only once this character has them.
+                      for _, src in ipairs({ { DATA.aas[cls], false }, { (DATA.aas_extra or {})[cls], true } }) do
+                        for sec, list in pairs(src[1] or {}) do
                             local isTuple = type(list) == 'table' and type(list[1]) == 'string' and tonumber(list[2]) ~= nil
                             local secNum = isTuple and tonumber(list[2]) or tonumber(sec) or 60
                             if aaTier(secNum) == tier and type(list) == 'table' then
                                 for _, item in ipairs(isTuple and { list } or list) do
                                     local nm = type(item) == 'table' and (item[1] or item.name) or tostring(item)
                                     if type(nm) == 'string' then nm = nm:match('^%s*(.-)%s*$') end
-                                    if type(nm) == 'string' and not tonumber(nm) and (not ctrl.aa_purchased_only or runtime.hasAA(nm)) then
+                                    if type(nm) == 'string' and not tonumber(nm)
+                                        and ((not ctrl.aa_purchased_only and not src[2]) or runtime.hasAA(nm)) then
                                         out[#out + 1] = { name = nm, cls = cls, info = fmtSec(secNum),
                                             infoTip = 'Cooldown ' .. fmtSec(secNum) .. ' (' .. tier .. ')',
                                             tooltip = function() runtime.showAATabTooltip(nm, cls, secNum, tier) end }
@@ -10437,6 +10441,7 @@ function UI.drawAATab()
                                 end
                             end
                         end
+                      end
                     end
                 end
                 return out
@@ -19171,7 +19176,8 @@ function runtime.aaTabOrder()
     local order, n = {}, 0
     for _, tier in ipairs({ 'short', 'mid', 'burn' }) do
         for _, cls in ipairs(myClasses or {}) do
-            for sec, list in pairs(DATA.aas[cls] or {}) do
+          for _, src in ipairs({ DATA.aas[cls], (DATA.aas_extra or {})[cls] }) do
+            for sec, list in pairs(src or {}) do
                 local isTuple = type(list) == 'table' and type(list[1]) == 'string' and tonumber(list[2]) ~= nil
                 local secNum = isTuple and tonumber(list[2]) or tonumber(sec) or 60
                 if aaTier(secNum) == tier and type(list) == 'table' then
@@ -19185,6 +19191,7 @@ function runtime.aaTabOrder()
                     end
                 end
             end
+          end
         end
     end
     runtime.aaTabOrderCache = { sig = sig, order = order }

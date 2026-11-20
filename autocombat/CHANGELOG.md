@@ -2,6 +2,10 @@
 
 > **Morituri Auto Combat (MoriAC)** is a fork of Triune AutoCombat for Project Morituri. Entries above the upstream `2026-10-11` section are fork changes; everything below them is upstream history.
 
+## 2026-11-20
+
+- **Learned AAs missing from the AAs page now show up.** Rogue's Fury, Inquisitor's Judgement, Neshika's Blink and other activated AAs couldn't be set up after you trained them. The apostrophe in the name wasn't the cause: the AAs page only lists AAs from MoriAC's data file, and that list stopped at what the base game opens by level 70. These AAs are level 80 there, but Morituri lets you train them earlier. 156 activated class AAs from the base game data (Rogue's Fury, Inquisitor's Judgement, Neshika's Blink, Ageless Enmity, Hate Step, Quick Time, the Fundament spires and others) are now in the data file. Each one appears on the AAs page, in its cooldown tier, **only once your character has a rank in it**, so the full list (with **Purchased only** off) isn't filled with AAs you can't train yet. Firing them works the same as for any other AA. If an AA you've trained still doesn't show, please report its exact name.
+
 ## 2026-11-05
 
 - **Alerts ding again by default (`lua/tac/alerts.lua` 1.2.0).** Players found the built-in alarm too much. Enrage, Rampage and Summoned now use the simple ding (`/beep`) again, and so do new triggers. Existing settings move back too: if one of those three is on the alarm, it switches to the ding when you update. Your own triggers and any `.wav` file you picked stay as they are. To keep the alarm, pick **Alarm (loud, built in)** as the trigger's sound in Setup -> Plugins -> Alerts again after updating.
