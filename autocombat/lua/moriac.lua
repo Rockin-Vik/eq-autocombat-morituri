@@ -21127,6 +21127,24 @@ end
 
 function runtime.noteEnrage(name, on)
     local ids = runtime.enrageIdsForName(name)
+    if on and #ids > 1 then
+        -- Several mobs share the name: a mob enrages at low HP, so mark only
+        -- the lowest-HP one(s). Marking every "a gnoll" left the others
+        -- "enraged" after the real one died enraged (no end line comes), and
+        -- melee stayed off on the next gnoll for up to ENRAGE_MAX_SEC.
+        local hps, low = {}, nil
+        for _, id in ipairs(ids) do
+            local hp = 100
+            pcall(function() hp = tonumber(mq.TLO.Spawn(id).PctHPs()) or 100 end)
+            hps[id] = hp
+            if not low or hp < low then low = hp end
+        end
+        local keep = {}
+        for _, id in ipairs(ids) do
+            if hps[id] == low then keep[#keep + 1] = id end
+        end
+        ids = keep
+    end
     for _, id in ipairs(ids) do
         if on then runtime.enraged[id] = os.clock() else runtime.enraged[id] = nil end
     end
