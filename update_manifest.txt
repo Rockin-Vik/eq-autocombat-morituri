@@ -1,11 +1,11 @@
 # MoriAC update manifest, written by dev/publish.sh. Read by lua/tac/update_check.lua.
-version=2026.11.23.0222
+version=2026.11.23.0230
 date=2026-11-23
-commit=14f5248
+commit=b2812b2
 file=config/moriac_alarm.wav 52962 7ab5ae2a
 file=config/moriac_data.lua 140000 b5906915
 file=lua/mac.lua 310 089d668c
-file=lua/moriac.lua 1229092 76954853
+file=lua/moriac.lua 1234719 af0093b3
 file=lua/tac/alerts.lua 24769 c9f9979a
 file=lua/tac/auto_aa.lua 163595 ab7c4329
 file=lua/tac/auto_accept.lua 30602 0c1987dd
@@ -35,6 +35,10 @@ file=lua/tac/tradeskill.lua 40899 ab8cb26d
 file=lua/tac/triune_log.lua 15583 576465e8
 file=lua/tac/update_check.lua 48330 7ad20a59
 note=## 2026-11-23
+note=
+note=- **Melee no longer creeps up on a mob one step at a time.** When the game said "Your target is too far away", MoriAC only moved 8 units closer and then forgot about it, so the approach to the next mob stopped short again. The result was step, swing, "too far away", step... This hit big mobs most, because their approach distance comes from the size the game reports for them. Now the first "too far away" moves you straight to just inside your **Melee distance**, and MoriAC keeps that shorter reach for that mob (for 10 minutes), so it doesn't stop short again. If the game still says too far, it moves 4 units closer each time.
+note=
+note=- **New `/ac why`: see why the puller skips a mob.** Target the mob and type `/ac why`. MoriAC runs the same search the puller runs, with your current radius, height, level and pull-list settings, and prints what it decided about that mob. For example: past the search radius, past the max height difference, outside the level range, not on the pull list, marked unreachable, no nav path to it, or a nav path that is too winding. It also says which mob the search would pick instead. It doesn't change anything. Use it when Hunt, Camp or Lure walks past a mob you expected it to fight.
 note=
 note=- **Puller (Hunt) walks to mobs again instead of standing still.** Since the "closest to walk to" change (2026-10-31), each search checked the nav path length of at most 15 mobs. That limit was meant to stop the search once it had a good pick, but it also stopped a search that had found nothing yet. Where the nearest 15 mobs all had long, winding routes (more than 2.5 times the straight-line distance, common in dungeons and on hills), the search gave up and Hunt waited, even with a mob further out that had a clean path. Walking up close to a mob made it the first one checked, so it got picked. Now the 15-mob limit only applies once a mob has been picked. This applies to Camp and Lure pulls too.
 note=

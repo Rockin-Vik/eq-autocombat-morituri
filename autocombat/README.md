@@ -139,6 +139,7 @@ Type `/ac help` in game for the full list.
 | `/ac net <all\|zone\|group\|Name> <command>` | Run a command on the boxes: an `/ac` command (`/ac net all burn on`) or any slash command as typed (`/ac net group /ac manual`, `/ac net all /camp`) |
 | `/ac scale 1.25` | Make every MoriAC window bigger (or smaller) |
 | `/ac status` | Print what the bot is doing |
+| `/ac why` | Puller: target a mob and see why it is or isn't picked (radius, height, level, pull list, nav path...) and what the scan would pick instead |
 | `/ac restart` | Reload the whole script |
 | `/ac update` / `/ac update install` / `/ac update get` | Check for an update / install it / check and install in one go (then `/ac restart`) |
 | `/ac alerts` / `/ac alerts mute` | List the alert triggers / silence their sounds |

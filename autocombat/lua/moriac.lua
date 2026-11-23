@@ -19935,8 +19935,31 @@ pursuit.NAV_CONST = {
     LOS_FLICKER_GRACE     = 2.5, -- treat LoS as still good this long after the last true reading (stairs flicker it)
 }
 
+-- Melee reach the game has told us is too long for one mob. The approach
+-- trusts MaxRangeTo for a big mob (and melee_dist for the rest), and when EQ
+-- answered "too far away" anyway the old fix only closed 8 more units and
+-- forgot it: the next approach stopped short again, so a pull went step,
+-- swing, "too far", step... repositionCloser records the distance it closed
+-- to here and both reach functions below cap at it for that mob.
+runtime.meleeCaps = {}
+runtime.MELEE_CAP_SEC = 600
+function runtime.meleeCapFor(id)
+    local c = id and runtime.meleeCaps[id]
+    if not c then return nil end
+    if (os.clock() - c.at) > runtime.MELEE_CAP_SEC then runtime.meleeCaps[id] = nil; return nil end
+    return c.dist
+end
+function runtime.noteMeleeTooFar(id, dist)
+    if not id or id <= 0 then return end
+    local n = 0
+    for _ in pairs(runtime.meleeCaps) do n = n + 1 end
+    if n >= 50 then runtime.meleeCaps = {} end
+    runtime.meleeCaps[id] = { dist = dist, at = os.clock() }
+end
+
 local function maxMeleeDistance(id)
     local NAV_CONST = pursuit.NAV_CONST
+    local cap = runtime.meleeCapFor(id)
     local userDist = (ctrl and ctrl.melee_dist) or NAV_CONST.MELEE_RANGE
     local spawnReach = 0
     if id and id > 0 then
@@ -19957,10 +19980,12 @@ local function maxMeleeDistance(id)
     end
     -- If target is an oversized mob (dragon, giant, etc.) with a huge physical hitbox reach
     -- exceeding the user's configured distance, expand reach to prevent clipping inside the model
+    local reach = userDist
     if spawnReach > 18 and spawnReach > userDist then
-        return spawnReach
+        reach = spawnReach
     end
-    return userDist
+    if cap then reach = math.min(reach, cap + 2) end
+    return reach
 end
 runtime.maxMeleeDistance = maxMeleeDistance
 
@@ -19982,6 +20007,7 @@ runtime.rangedApproachDist = rangedApproachDist
 -- Melee approach distance (the Melee style branch of desiredRange).
 local function meleeDesiredRange(id)
     local NAV_CONST = pursuit.NAV_CONST
+    local cap = runtime.meleeCapFor(id)
     local userDist = (ctrl and ctrl.melee_dist) or NAV_CONST.MELEE_RANGE
     local spawnReach = 0
     if id and id > 0 then
@@ -20001,11 +20027,15 @@ local function meleeDesiredRange(id)
         end
     end
     -- For oversized mobs with hitboxes exceeding user distance, position near the outer edge
+    local want
     if spawnReach > 18 and spawnReach > userDist then
-        return math.max(userDist, math.floor(spawnReach - 3))
+        want = math.max(userDist, math.floor(spawnReach - 3))
+    else
+        -- Position slightly inside user's max melee distance to avoid edge jitter
+        want = math.max(4, math.floor(userDist - 2))
     end
-    -- Position slightly inside user's max melee distance to avoid edge jitter
-    return math.max(4, math.floor(userDist - 2))
+    if cap then want = math.min(want, cap) end
+    return want
 end
 runtime.meleeDesiredRange = meleeDesiredRange
 
@@ -20806,7 +20836,12 @@ local function repositionCloser()
     if (ctrl and ctrl.combat_style) ~= 'Melee' then
         targetDist = math.max(5, math.min(targetDist, math.floor(currentDist - 15)))
     else
-        targetDist = math.max(5, math.min(targetDist, math.floor(currentDist - 8)))
+        -- Melee: go straight to inside melee_dist (not 8 units at a time) and
+        -- keep that reach for this mob, so the next approach doesn't stop
+        -- short again. A repeat "too far" tightens it 4 more each time.
+        local base = math.max(4, math.floor(((ctrl and ctrl.melee_dist) or pursuit.NAV_CONST.MELEE_RANGE) - 2))
+        targetDist = math.max(4, math.min(targetDist, base, math.floor(currentDist - 4)))
+        runtime.noteMeleeTooFar(tid, targetDist)
     end
 
     print(string.format(
@@ -23077,9 +23112,12 @@ runtime.ROAM_PICK = {
     CAMP_OFFSET    = 30,  -- Camp/Lure: further than this from camp, rank from the camp
     MAX_MEASURED   = 15,  -- PathLength queries per scan before taking the best so far (once there is one)
 }
-function runtime.findRoamTarget(searchRadius, searchMaxZ, minLevel, maxLevel, fresh)
+function runtime.findRoamTarget(searchRadius, searchMaxZ, minLevel, maxLevel, fresh, trace)
     local wp = runtime.wpNode and runtime.wpNode()
-    if wp and wp.kind == 'Travel' then return nil, true end
+    if wp and wp.kind == 'Travel' then
+        if trace then trace.stop = 'the current waypoint is a Travel node: no mobs are picked until the next Hunt node' end
+        return nil, true
+    end
     local isPulling    = (ctrl.mode == 'Puller')
     local isCampMode   = isPulling and (ctrl.submode == 'Camp' or ctrl.submode == 'Lure')
     local minLv        = minLevel or (isCampMode and (ctrl.pull_min_level or 1) or (ctrl.hunter_min_level or 1))
@@ -23109,7 +23147,7 @@ function runtime.findRoamTarget(searchRadius, searchMaxZ, minLevel, maxLevel, fr
     local nowScan = os.clock()
     local emptyKey = string.format('%s|%s|%s|%s', tostring(searchRadius), tostring(searchMaxZ), tostring(minLv), tostring(maxLv))
     local lastEmpty = runtime.roamScanEmpty
-    if not fresh and lastEmpty and lastEmpty.key == emptyKey and (nowScan - lastEmpty.at) < 1.0 then return nil, false end
+    if not fresh and not trace and lastEmpty and lastEmpty.key == emptyKey and (nowScan - lastEmpty.at) < 1.0 then return nil, false end
 
     local playerOffMesh = runtime.isPlayerOffMesh()
     -- Candidates that passed every filter but PathExists. If that is ALL of
@@ -23160,6 +23198,85 @@ function runtime.findRoamTarget(searchRadius, searchMaxZ, minLevel, maxLevel, fr
         if off > C.CAMP_OFFSET then fromCamp = { x = cx, y = cy, off = off } end
     end
 
+    local measured = 0 -- PathLength queries this scan (see C.MAX_MEASURED)
+    -- One candidate: its score (lower wins), or nil and why it was passed
+    -- over. The reasons feed /ac why (runtime.explainRoamPick); the scan
+    -- itself only uses the score.
+    local function judge(s, sid)
+        if runtime.isBoxClaimedTarget(sid, claimed) then return nil, 'another box on the Box Network has it' end
+        local sname = s.CleanName()
+        local dead, stype, state = false, '', ''
+        pcall(function()
+            dead = s.Dead() or false
+            stype = s.Type() or ''
+            state = s.State() or ''
+        end)
+        if dead or stype == 'Corpse' or state == 'DEAD' then return nil, 'dead' end
+        -- (isHostileTarget below already covers isSpawnPetOrPlayer)
+        if not runtime.isPullAllowed(sname) then
+            return nil, isIgnored(sname) and 'on the ignore list' or 'not on the pull list (Setup -> Pull list)'
+        end
+        if not runtime.isConAllowed(s) then return nil, 'its con colour is filtered out' end
+        if isUnreachable(sid) then
+            return nil, (runtime.isNoDamageSkip and runtime.isNoDamageSkip(sid)) and 'skipped for taking no damage (10 min)'
+                or 'marked unreachable (60 s)'
+        end
+        local sy, sx = s.Y() or 0, s.X() or 0
+        if outsideAnchor(sy, sx) then return nil, 'outside the anchor / camp circle' end
+        local slvl = s.Level() or 0
+        if slvl < minLv or slvl > maxLv then
+            return nil, string.format('level %d is outside the level range %d-%d', slvl, minLv, maxLv)
+        end
+        if not isHostileTarget(sid) then return nil, 'not hostile (pet, player or non-attackable)' end
+        if not runtime.verifyTargetCon(sid) then return nil, 'its con colour is filtered out' end
+        local sz = s.Z() or 0
+        local dist = s.Distance3D() or 999
+        local walk = dist
+        -- Only melee has to walk into the hazard; ranged/spell can hit it from outside.
+        local isMeleeStyle = (ctrl and ctrl.combat_style or 'Melee') == 'Melee'
+        if isMeleeStyle and runtime.isCoordInActiveHazard(sx, sy, sz) then return nil, 'stands in a saved hazard (melee)' end
+        if navLoaded() and not playerOffMesh then
+            local meshOk, meshLoaded = pcall(function() return mq.TLO.Navigation.MeshLoaded() end)
+            if meshOk and meshLoaded then
+                local closeReach = desiredRange(sid) or 14
+                if dist > closeReach or not hasLoS(sid) then
+                    local ok, hasPath = pathExists(sid)
+                    if ok and not hasPath and levitating then
+                        levNoPath = true
+                        if not hasLoS(sid) then
+                            walk = walk * C.OFF_FLOOR_MULT + C.OFF_FLOOR_ADD
+                        end
+                    elseif ok and not hasPath then
+                        noPath.count = noPath.count + 1
+                        if noPath.id == 0 then
+                            noPath.id = sid; noPath.dist = dist; noPath.los = hasLoS(sid)
+                        end
+                        return nil, 'no nav path to it (MQ2Nav PathExists is false)'
+                    elseif ok and hasPath then
+                        local pathLen = 0
+                        pcall(function() pathLen = mq.TLO.Navigation.PathLength('id ' .. sid)() or 0 end)
+                        measured = measured + 1
+                        local maxRatio = ctrl.nav_max_path_ratio or 2.5
+                        if pathLen > 0 and dist > 20 and (pathLen / dist) > maxRatio then
+                            return nil, string.format('nav path %.0f is over %.1fx the straight line %.0f (too winding)',
+                                pathLen, maxRatio, dist)
+                        elseif pathLen > walk then
+                            walk = pathLen
+                        end
+                    end
+                end
+            end
+        end
+        local score = walk
+        if fromCamp then
+            score = math.sqrt((sx - fromCamp.x) ^ 2 + (sy - fromCamp.y) ^ 2)
+        end
+        if math.abs(sz - myZ) > tier1Z then
+            score = score * C.OFF_FLOOR_MULT + C.OFF_FLOOR_ADD
+        end
+        return score
+    end
+
     local function scanSpawns()
         local radius = searchRadius or 100
         -- Nothing inside the anchor circle is farther from us than the anchor
@@ -23171,7 +23288,8 @@ function runtime.findRoamTarget(searchRadius, searchMaxZ, minLevel, maxLevel, fr
             radius = math.min(radius, math.ceil(md + huntRadius))
         end
         local p = string.format('npc radius %d zradius %d targetable', radius, maxZ)
-        local bestId, bestScore, measured = nil, nil, 0
+        if trace then trace.query = p end
+        local bestId, bestScore = nil, nil
         for i = 1, 100 do
             local s = mq.TLO.NearestSpawn(i, p)
             if not s() then break end
@@ -23180,96 +23298,37 @@ function runtime.findRoamTarget(searchRadius, searchMaxZ, minLevel, maxLevel, fr
             -- best score (less how far we stand from camp) nothing after it
             -- can win.
             local straight = s.Distance() or 0
-            if bestScore and (straight - (fromCamp and fromCamp.off or 0)) >= bestScore then break end
+            if bestScore and (straight - (fromCamp and fromCamp.off or 0)) >= bestScore then
+                if trace then trace.stop = 'nothing further away could beat the best pick' end
+                break
+            end
             -- The PathLength budget caps refining a pick we already have. It
             -- must not end a scan with no pick: in a dungeon the nearest 15
             -- mobs can all be on winding routes (path ratio too high), and
             -- the scan gave up there and Hunt stood still, though a mob
             -- further down the list had a clean path.
-            if bestScore and measured >= C.MAX_MEASURED then break end
+            if bestScore and measured >= C.MAX_MEASURED then
+                if trace then trace.stop = 'path-length budget used up after a pick' end
+                break
+            end
 
             local sid = s.ID() or 0
-            if sid > 0 and not runtime.isBoxClaimedTarget(sid, claimed) then
-                local sname = s.CleanName()
-                local dead = false
-                local stype = ''
-                local state = ''
-                pcall(function()
-                    dead = s.Dead() or false
-                    stype = s.Type() or ''
-                    state = s.State() or ''
-                end)
-                local isDead = dead or stype == 'Corpse' or state == 'DEAD'
-                -- (isHostileTarget below already covers isSpawnPetOrPlayer)
-                if not isDead and runtime.isPullAllowed(sname) and runtime.isConAllowed(s) and not isUnreachable(sid) then
-                    local sy = s.Y() or 0
-                    local sx = s.X() or 0
-                    if not outsideAnchor(sy, sx) then
-                        local slvl = s.Level() or 0
-                        if slvl >= minLv and slvl <= maxLv then
-                            if isHostileTarget(sid) then
-                                if runtime.verifyTargetCon(sid) then
-                                    local sz = s.Z() or 0
-                                    local dist = s.Distance3D() or 999
-                                    local walk = dist
-                                    local inHaz = runtime.isCoordInActiveHazard(sx, sy, sz)
-                                    -- Only melee has to walk into the hazard; ranged/spell can hit it from outside.
-                                    local isMeleeStyle = (ctrl and ctrl.combat_style or 'Melee') == 'Melee'
-                                    local pathOk = not (inHaz and isMeleeStyle)
-                                    if pathOk and navLoaded() and not playerOffMesh then
-                                            local meshOk, meshLoaded = pcall(function() return mq.TLO.Navigation.MeshLoaded() end)
-                                            if meshOk and meshLoaded then
-                                                local closeReach = desiredRange(sid) or 14
-                                                if dist > closeReach or not hasLoS(sid) then
-                                                    local ok, hasPath = pathExists(sid)
-                                                    if ok and not hasPath and levitating then
-                                                        levNoPath = true
-                                                        if not hasLoS(sid) then
-                                                            walk = walk * C.OFF_FLOOR_MULT + C.OFF_FLOOR_ADD
-                                                        end
-                                                    elseif ok and not hasPath then
-                                                        pathOk = false
-                                                        noPath.count = noPath.count + 1
-                                                        if noPath.id == 0 then
-                                                            noPath.id = sid; noPath.dist = dist; noPath.los = hasLoS(sid)
-                                                        end
-                                                    elseif ok and hasPath then
-                                                        local pathLen = 0
-                                                        pcall(function() pathLen = mq.TLO.Navigation.PathLength('id ' .. sid)() or 0 end)
-                                                        measured = measured + 1
-                                                        local maxRatio = ctrl.nav_max_path_ratio or 2.5
-                                                        if pathLen > 0 and dist > 20 and (pathLen / dist) > maxRatio then
-                                                            pathOk = false
-                                                        elseif pathLen > walk then
-                                                            walk = pathLen
-                                                        end
-                                                    end
-                                                end
-                                            end
-                                        end
-                                        if pathOk then
-                                        local score = walk
-                                        if fromCamp then
-                                            score = math.sqrt((sx - fromCamp.x) ^ 2 + (sy - fromCamp.y) ^ 2)
-                                        end
-                                        if math.abs(sz - myZ) > tier1Z then
-                                            score = score * C.OFF_FLOOR_MULT + C.OFF_FLOOR_ADD
-                                        end
-                                        if not bestScore or score < bestScore then
-                                            bestId, bestScore = sid, score
-                                        end
-                                    end
-                                end
-                            end
-                        end
-                    end
+            if sid > 0 then
+                local score, why = judge(s, sid)
+                if trace then trace[sid] = score and string.format('a candidate (score %.0f)', score) or why end
+                if score and (not bestScore or score < bestScore) then
+                    bestId, bestScore = sid, score
                 end
             end
         end
+        if trace then trace.best = bestId end
         return bestId
     end
 
     local targetId = scanSpawns()
+    -- /ac why: a dry run. Skip the mesh-isolation bookkeeping, chat notes
+    -- and empty-scan cache below so asking never changes what the puller does.
+    if trace then return targetId end
     if targetId and levNoPath and not runtime.levNoPathNoted then
         runtime.levNoPathNoted = true
         print('\ay[MoriAC]\ax Levitating: no nav path from up here, so mobs are picked by straight-line distance until levitate drops.')
@@ -23299,6 +23358,73 @@ function runtime.findRoamTarget(searchRadius, searchMaxZ, minLevel, maxLevel, fr
 
     runtime.roamScanEmpty = { key = emptyKey, at = nowScan }
     return nil, true
+end
+
+-- /ac why: target a mob and ask why the puller does (or doesn't) pick it.
+-- Runs the same scan the puller runs, with the same radius, height and level
+-- settings, as a dry run that records each candidate's verdict, and prints
+-- the target's verdict and the scan's pick. Changes nothing.
+function runtime.explainRoamPick()
+    local P = '\ay[MoriAC]\ax why: '
+    if ctrl.mode ~= 'Puller' then
+        print(P .. 'only Puller mode picks mobs by itself (mode is ' .. tostring(ctrl.mode) .. ').')
+        return
+    end
+    local tid, name, d2, d3, dz, targetable, ttype = 0, '?', 0, 0, 0, true, '?'
+    pcall(function()
+        local t = mq.TLO.Target
+        if t() then
+            tid = t.ID() or 0; name = t.CleanName() or '?'
+            d2 = t.Distance() or 0; d3 = t.Distance3D() or 0
+            dz = math.abs((t.Z() or 0) - (mq.TLO.Me.Z() or 0))
+            ttype = t.Type() or '?'
+            if t.Targetable then targetable = t.Targetable() ~= false end
+        end
+    end)
+    local isCamp = ctrl.submode == 'Camp' or ctrl.submode == 'Lure'
+    local radius, maxZ, minL, maxL, radiusName
+    if isCamp then
+        local hasWps = ctrl.waypoints and #ctrl.waypoints > 0 and ctrl.use_waypoints ~= false
+        radius = hasWps and (ctrl.waypoint_scan_radius or 100) or (ctrl.camp_radius or 100)
+        radiusName = hasWps and 'Waypoint scan radius' or 'Pull radius'
+        maxZ, minL, maxL = ctrl.camp_z or 75, ctrl.pull_min_level, ctrl.pull_max_level
+    else
+        local hasWps = ctrl.waypoints and #ctrl.waypoints > 0 and ctrl.use_waypoints ~= false
+        radius = hasWps and (ctrl.waypoint_scan_radius or 100) or (ctrl.hunter_radius or 1500)
+        radiusName = hasWps and 'Waypoint scan radius' or 'Search radius'
+        maxZ, minL, maxL = ctrl.hunter_z or 75, ctrl.hunter_min_level, ctrl.hunter_max_level
+    end
+    local trace = {}
+    local pick = runtime.findRoamTarget(radius, maxZ, minL, maxL, true, trace)
+    if tid > 0 then
+        local verdict = trace[tid]
+        if not verdict then
+            if ttype ~= 'NPC' then
+                verdict = 'it is not an NPC (' .. tostring(ttype) .. ')'
+            elseif not targetable then
+                verdict = 'it is not targetable'
+            elseif d2 > radius then
+                verdict = string.format('it is %.0f away, past the %s (%d)', d2, radiusName, radius)
+            elseif dz > maxZ then
+                verdict = string.format('it is %.0f above/below you, past the Max height difference (%d)', dz, maxZ)
+            elseif trace.stop then
+                verdict = 'the scan stopped before reaching it: ' .. trace.stop
+            else
+                verdict = 'the spawn search (' .. tostring(trace.query) .. ') did not return it'
+            end
+        end
+        print(string.format('%s#%d %s (%.0f away, %.0f in 3D, %.0f up/down): %s', P, tid, name, d2, d3, dz, verdict))
+        if isXTargetId(tid) then print(P .. 'it is on your extended target, so the puller fights it before scanning.') end
+    else
+        print(P .. 'no target. Target a mob and type /ac why to see why it is or isn\'t picked.')
+    end
+    if pick then
+        local pn = '?'
+        pcall(function() pn = mq.TLO.Spawn(pick).CleanName() or '?' end)
+        print(string.format('%sthe scan would pick #%d %s (%.0f away).', P, pick, pn, distToId(pick)))
+    else
+        print(string.format('%sthe scan finds nothing to pick%s.', P, trace.stop and (' -- ' .. trace.stop) or ''))
+    end
 end
 
 function runtime.checkCloserTarget(curTargetId, searchRadius, searchMaxZ, minLevel, maxLevel)
@@ -24026,6 +24152,7 @@ runtime.onZoned = function()
     pursuit.unreachableIds = {}
     runtime.noDamageIds = {}
     runtime.noDamageTrack = nil
+    runtime.meleeCaps = {}
     runtime.campHold = nil
     pursuit.id = 0
     pursuit.wanderLoc = nil
@@ -26115,6 +26242,8 @@ local function triuneCommand(...)
         runtime.classDumpRequested = true -- runs on the main loop (may open the Inventory window)
     elseif cmd == 'redetect' then
         reDetectRequested = true
+    elseif cmd == 'why' then
+        runtime.whyRequested = true -- runs on the main loop (the scan may /consider and doevents)
     elseif cmd == 'status' then
         local modeStr = ctrl.mode
         if MODES.SUBMODES[ctrl.mode] then modeStr = modeStr .. ' (' .. ctrl.submode .. ')' end
@@ -27088,6 +27217,11 @@ local function runMainLoop()
         if runtime.classRecheckAt and os.time() >= runtime.classRecheckAt then
             runtime.classRecheckAt = nil
             runtime.loopStep('class recheck', runtime.healClasses)
+        end
+        if runtime.whyRequested then
+            runtime.whyRequested = false
+            local okWhy, errWhy = pcall(runtime.explainRoamPick)
+            if not okWhy then print('\ar[MoriAC]\ax /ac why failed: ' .. tostring(errWhy)) end
         end
         if runtime.classDumpRequested then
             runtime.classDumpRequested = false
