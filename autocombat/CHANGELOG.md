@@ -4,6 +4,8 @@
 
 ## 2026-11-23
 
+- **Puller (Hunt) walks to mobs again instead of standing still.** Since the "closest to walk to" change (2026-10-31), each search checked the nav path length of at most 15 mobs. That limit was meant to stop the search once it had a good pick, but it also stopped a search that had found nothing yet. Where the nearest 15 mobs all had long, winding routes (more than 2.5 times the straight-line distance, common in dungeons and on hills), the search gave up and Hunt waited, even with a mob further out that had a clean path. Walking up close to a mob made it the first one checked, so it got picked. Now the 15-mob limit only applies once a mob has been picked. This applies to Camp and Lure pulls too.
+
 - **Melee no longer stays off on the next mob after an enraged one dies.** The "has become ENRAGED" line only carries a name, so MoriAC marked every mob with that name on your extended target as enraged. A mob usually dies while enraged, and then no "is no longer enraged" line comes, so the other "a gnoll"s stayed marked. MoriAC kept auto-attack off on the next one for up to 3 minutes. Mobs enrage at low HP, so now only the lowest-HP mob with that name is marked. To skip enrage handling altogether, untick **Stop Attacking While The Target Is Enraged** in Setup -> Settings. (The Alerts plugin only plays the sound; it never stops your attack.)
 
 ## 2026-11-20

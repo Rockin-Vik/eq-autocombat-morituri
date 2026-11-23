@@ -1,11 +1,11 @@
 # MoriAC update manifest, written by dev/publish.sh. Read by lua/tac/update_check.lua.
-version=2026.11.23.0213
+version=2026.11.23.0222
 date=2026-11-23
-commit=f9cff95
+commit=14f5248
 file=config/moriac_alarm.wav 52962 7ab5ae2a
 file=config/moriac_data.lua 140000 b5906915
 file=lua/mac.lua 310 089d668c
-file=lua/moriac.lua 1228699 812f8168
+file=lua/moriac.lua 1229092 76954853
 file=lua/tac/alerts.lua 24769 c9f9979a
 file=lua/tac/auto_aa.lua 163595 ab7c4329
 file=lua/tac/auto_accept.lua 30602 0c1987dd
@@ -35,6 +35,8 @@ file=lua/tac/tradeskill.lua 40899 ab8cb26d
 file=lua/tac/triune_log.lua 15583 576465e8
 file=lua/tac/update_check.lua 48330 7ad20a59
 note=## 2026-11-23
+note=
+note=- **Puller (Hunt) walks to mobs again instead of standing still.** Since the "closest to walk to" change (2026-10-31), each search checked the nav path length of at most 15 mobs. That limit was meant to stop the search once it had a good pick, but it also stopped a search that had found nothing yet. Where the nearest 15 mobs all had long, winding routes (more than 2.5 times the straight-line distance, common in dungeons and on hills), the search gave up and Hunt waited, even with a mob further out that had a clean path. Walking up close to a mob made it the first one checked, so it got picked. Now the 15-mob limit only applies once a mob has been picked. This applies to Camp and Lure pulls too.
 note=
 note=- **Melee no longer stays off on the next mob after an enraged one dies.** The "has become ENRAGED" line only carries a name, so MoriAC marked every mob with that name on your extended target as enraged. A mob usually dies while enraged, and then no "is no longer enraged" line comes, so the other "a gnoll"s stayed marked. MoriAC kept auto-attack off on the next one for up to 3 minutes. Mobs enrage at low HP, so now only the lowest-HP mob with that name is marked. To skip enrage handling altogether, untick **Stop Attacking While The Target Is Enraged** in Setup -> Settings. (The Alerts plugin only plays the sound; it never stops your attack.)
 note=

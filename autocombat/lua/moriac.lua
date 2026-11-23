@@ -23075,7 +23075,7 @@ runtime.ROAM_PICK = {
     OFF_FLOOR_MULT = 1.5, -- score of a mob off our floor: walk x 1.5 + 20, so a
     OFF_FLOOR_ADD  = 20,  -- slope mob 20 away (50) beats a same-floor one 95 away
     CAMP_OFFSET    = 30,  -- Camp/Lure: further than this from camp, rank from the camp
-    MAX_MEASURED   = 15,  -- PathLength queries per scan before taking the best so far
+    MAX_MEASURED   = 15,  -- PathLength queries per scan before taking the best so far (once there is one)
 }
 function runtime.findRoamTarget(searchRadius, searchMaxZ, minLevel, maxLevel, fresh)
     local wp = runtime.wpNode and runtime.wpNode()
@@ -23181,7 +23181,12 @@ function runtime.findRoamTarget(searchRadius, searchMaxZ, minLevel, maxLevel, fr
             -- can win.
             local straight = s.Distance() or 0
             if bestScore and (straight - (fromCamp and fromCamp.off or 0)) >= bestScore then break end
-            if measured >= C.MAX_MEASURED then break end
+            -- The PathLength budget caps refining a pick we already have. It
+            -- must not end a scan with no pick: in a dungeon the nearest 15
+            -- mobs can all be on winding routes (path ratio too high), and
+            -- the scan gave up there and Hunt stood still, though a mob
+            -- further down the list had a clean path.
+            if bestScore and measured >= C.MAX_MEASURED then break end
 
             local sid = s.ID() or 0
             if sid > 0 and not runtime.isBoxClaimedTarget(sid, claimed) then
