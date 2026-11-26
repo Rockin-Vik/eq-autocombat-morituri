@@ -11,6 +11,15 @@ Unless a change says otherwise, Morituri behaves exactly as before. Code that di
 - `#attackmode` doesn't exist. Bows fire with the normal `/autofire`.
 - `#nms` and the `kratos` buff NPC are Morituri-only.
 
+## 2026-11-25 (3): Settings files get the server name on Perky
+
+- **Problem:** on Perky, `EverQuest.ServerName` and `Zone.Server` come back empty, so every character's settings went to `moriac_loadout__<char>.lua`. A character with the same name on another server that also reports an empty name would share the file, and the camp-to-another-server reload couldn't tell the servers apart.
+- **Fix:** `runtime.currentServer()` still tries `ServerName`, then `Zone.Server`, so servers where those work keep their file names. It falls back to `EverQuest.Server`, so Perky files are now `moriac_loadout_Perky_Crew_<char>.lua`. Values that are empty, `NULL` or `nil` all count as empty. The MoriAC log file name follows the same name.
+- **Existing settings:** the first time a Perky character loads under the new name, MoriAC copies `moriac_loadout__<char>.lua` (or its `.tmp`, or an older `triune_loadout__<char>.lua`) to the new name. It copies, never moves, and never overwrites a file that's already there. The copy never happens on Morituri, because the empty-name file is shared and may hold another server's settings.
+- **Server-change reload:** MoriAC remembers which source named the server and only watches that one, so another source spelling the same server differently can't make it reload back and forth. If that source goes empty after a camp, the current name decides.
+- **Timers:** the plugin's change-detection key now uses all three sources.
+- **Review:** two review passes by a model from another vendor. The first found that the copy could pull the shared file into a Morituri character, that a spelling difference between sources could make it reload over and over, the missing `triune_` and `.tmp` sources, and the `NULL` placeholder. The second found that the first fix for the spelling problem could hold back a real camp's reload. All are fixed.
+
 ## 2026-11-25 (2): `/lua run mac` froze the game
 
 Commit `7ad2423`.
@@ -47,7 +56,6 @@ Commit `ffc3c0f`.
 
 ## Known issues and gaps
 
-- **Empty server name:** on Perky, `EverQuest.ServerName` and `Zone.Server` come back empty, so settings files are named `moriac_loadout__<char>.lua`. The server-change reload can't tell Perky apart from another server that also reports an empty name. Fixing this means renaming existing settings files.
 - **Missing AAs:** AAs that aren't in `config/moriac_data.lua` at all, such as custom Perky AAs, don't show on the AAs page.
 - **Cosmetic:** the window still shows four class slots, and the Spells level filter tops out at 70 (Perky's cap is 54).
 - **Untested in game:** Ranged style with `/autofire`, rebirth AAs on the AAs page, and pulling.

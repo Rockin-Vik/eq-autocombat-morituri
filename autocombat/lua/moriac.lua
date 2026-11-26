@@ -5219,10 +5219,7 @@ tlog.init({
     getFileEnabled = function() return ctrl and ctrl.log_to_file == true end,
     getDebug       = function() return ctrl and ctrl.debug_mode == true end,
     identity       = function()
-        local serverName = ''
-        pcall(function() serverName = mq.TLO.EverQuest.ServerName() or '' end)
-        if serverName == '' then pcall(function() serverName = mq.TLO.Zone.Server() or '' end) end
-        return serverName, myName or ''
+        return (runtime.currentServer()), myName or ''
     end,
     headerInfo     = function()
         local cls, lvl, zone = '?', '?', '?'
@@ -5956,13 +5953,49 @@ end
 -- Per-character loadout file path (multibox-safe). Each client writes ONLY its
 -- own moriac_loadout_<server>_<char>.lua, so different characters never share
 -- (and never overwrite each other's) settings, ignore/pull lists, or zone data.
+-- ServerName / Zone.Server come first so servers where they work keep their
+-- existing file names. Both are empty on some servers (Perky Crew), which put
+-- every character there in moriac_loadout__<char>.lua; EverQuest.Server
+-- names those. Second result: true when only EverQuest.Server gave a name.
+local SERVER_GETTERS = {
+    function() return mq.TLO.EverQuest.ServerName() end,
+    function() return mq.TLO.Zone.Server() end,
+    function() return mq.TLO.EverQuest.Server() end,
+}
+
+-- The i-th server source as a string, '' when empty / NULL / failing.
+local function serverFrom(i)
+    local ok, s = pcall(SERVER_GETTERS[i])
+    if ok and type(s) == 'string' and s ~= '' and s ~= 'NULL' and s ~= 'nil' then return s end
+    return ''
+end
+
+-- Returns name, onlyViaEverQuestServer, index of the source that gave it.
 function runtime.currentServer()
-    local serverName = ''
-    pcall(function() serverName = mq.TLO.EverQuest.ServerName() or '' end)
-    if not serverName or serverName == '' then
-        pcall(function() serverName = mq.TLO.Zone.Server() or '' end)
+    for i = 1, #SERVER_GETTERS do
+        local s = serverFrom(i)
+        if s ~= '' then return s, i == #SERVER_GETTERS, i end
     end
-    return tostring(serverName or '')
+    return '', false, nil
+end
+
+-- True once the server differs from the one the settings were loaded for.
+-- Watches the source that named it, so another source spelling the same
+-- server differently can't flip it back and forth; if that source goes empty
+-- (a server where it doesn't work), the current name decides.
+function runtime.serverChangedSinceLoad()
+    if runtime.loadedServer == nil then return false end
+    local own = runtime.loadedServerIdx and serverFrom(runtime.loadedServerIdx) or ''
+    if own ~= '' then return own ~= runtime.loadedServer end
+    local cur = runtime.currentServer()
+    return cur ~= '' and cur ~= runtime.loadedServer
+end
+
+-- The file a server with no ServerName / Zone.Server used before
+-- runtime.currentServer fell back to EverQuest.Server.
+function runtime.legacyEmptyServerLoadoutPath()
+    local tag = ('_' .. tostring(myName or 'unknown')):gsub('[^%w%_-]', '_')
+    return mq.configDir .. '/moriac_loadout_' .. tag .. '.lua'
 end
 
 function runtime.loadoutFilePath()
@@ -5973,7 +6006,8 @@ function runtime.loadoutFilePath()
 end
 
 function runtime.loadAll()
-    runtime.loadedServer = runtime.currentServer()
+    local viaServerOnly
+    runtime.loadedServer, viaServerOnly, runtime.loadedServerIdx = runtime.currentServer()
     -- Start clean: a character with no saved file must not inherit the
     -- previous character's data (and save it under its own name).
     ALLDATA = {}
@@ -5982,6 +6016,30 @@ function runtime.loadAll()
     local t = nil
     if myName then
         local path = runtime.migrateConfigFile(runtime.loadoutFilePath())
+        -- First load under a real server name: copy (never move, another
+        -- server may still use it) the file saved under an empty server name.
+        -- Only servers that had no ServerName / Zone.Server used that file.
+        -- Never on Morituri: the file is shared, so it may hold another
+        -- server's settings for a character of the same name.
+        local legacy = runtime.legacyEmptyServerLoadoutPath()
+        if viaServerOnly and legacy ~= path and not MORIAC_IS_MORITURI() then
+            local have = io.open(path, 'rb')
+            if have then
+                have:close()
+            else
+                runtime.migrateConfigFile(legacy) -- an even older triune_loadout__<char>.lua
+                for _, from in ipairs({ legacy, legacy .. '.tmp' }) do
+                    local src = io.open(from, 'rb')
+                    if src then
+                        local data = src:read('*a')
+                        src:close()
+                        local dst = io.open(path, 'wb')
+                        if dst then dst:write(data or ''); dst:close() end
+                        break
+                    end
+                end
+            end
+        end
         -- A save whose final rename failed leaves the only good copy in .tmp.
         for _, p in ipairs({ path, path .. '.tmp' }) do
             local fn = loadfile(p)
@@ -27221,10 +27279,9 @@ local function runMainLoop()
         runtime.doeventsMs = (os.clock() - evT0) * 1000
         runtime.loopStep('character change', function()
         local nm = mq.TLO.Me.CleanName()
-        local srv = runtime.currentServer()
         -- A camp to another server can keep the same character name, so a
         -- server change also reloads (that server's file and plugin defaults).
-        local serverChanged = runtime.loadedServer ~= nil and srv ~= '' and srv ~= runtime.loadedServer
+        local serverChanged = runtime.serverChangedSinceLoad()
         if nm and nm ~= '' and (nm ~= myName or serverChanged) then
             -- Flush the outgoing character's pending (debounced / not yet
             -- detected) changes to ITS file before myName moves on.

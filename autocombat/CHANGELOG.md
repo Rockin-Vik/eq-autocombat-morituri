@@ -2,6 +2,10 @@
 
 > **Morituri Auto Combat (MoriAC)** is a fork of Triune AutoCombat for Project Morituri. Entries above the upstream `2026-10-11` section are fork changes; everything below them is upstream history.
 
+## 2026-11-25 (3)
+
+- **Settings files get the server name on servers where `EverQuest.ServerName` is empty (Perky Crew).** They used to be saved as `moriac_loadout__<char>.lua`; now they're `moriac_loadout_Perky_Crew_<char>.lua`. Your existing settings are copied over the first time (never on Morituri). Servers where `ServerName` works keep their file names.
+
 ## 2026-11-25 (2)
 
 - **`/lua run mac` no longer freezes the game.** The short-name launcher started MoriAC with `dofile`, which MacroQuest's Lua cannot pause through, so MoriAC never gave a frame back to the game. It now loads MoriAC as a normal Lua call. `/lua run moriac` was not affected.

@@ -167,7 +167,10 @@ function plugin.onInit(coreApi)
     -- Re-seed only for a new character or server (onLoadSettings then applies a
     -- saved list), so an off/on toggle keeps edits not yet autosaved.
     local ok, key = pcall(function()
-        return tostring(mq.TLO.EverQuest.ServerName()) .. '/' .. tostring(mq.TLO.Me.CleanName())
+        -- All server sources: some are empty on some servers, so one alone can't tell them apart.
+        local function s(v) return (v == nil or v == 'NULL') and '' or tostring(v) end
+        return s(mq.TLO.EverQuest.Server()) .. '|' .. s(mq.TLO.EverQuest.ServerName()) .. '|'
+            .. s(mq.TLO.Zone.Server()) .. '/' .. s(mq.TLO.Me.CleanName())
     end)
     key = ok and key or ''
     if key ~= seededFor then
