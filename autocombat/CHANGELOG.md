@@ -2,6 +2,10 @@
 
 > **Morituri Auto Combat (MoriAC)** is a fork of Triune AutoCombat for Project Morituri. Entries above the upstream `2026-10-11` section are fork changes; everything below them is upstream history.
 
+## 2026-11-25 (5): moriac.lua split into modules
+
+- **No behaviour change intended.** The plugin manager, the Update/Plugins, Settings and mini-window pages, and waypoint preset export/import moved out of `moriac.lua` into `lua/moriac_plugin_manager.lua`, `moriac_ui_plugins.lua`, `moriac_ui_settings.lua`, `moriac_ui_mini.lua` and `moriac_wp_presets.lua`. The combat tick is split into named phases that run in the same order. Install all five new files next to `moriac.lua`; MoriAC will not start without them.
+
 ## 2026-11-25 (4)
 
 - **Boxnet is safer by default.** Peers can no longer make your boxes run plain slash commands unless you turn "also run slash commands" on. Even then, code-loading, chat, petition and logout commands (`/lua`, `/mac`, `/say`, `/tell`, `/ooc`, `/1`, `/quit` and similar) are always refused, also when wrapped in `/nomodkey`, `/squelch`, `/noparse`, `/timed N` or `/docommand`. Nested `/ac net` and `/multiline` are refused. Only the transport's sender name is trusted.
