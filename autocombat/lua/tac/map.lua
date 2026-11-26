@@ -490,10 +490,19 @@ local function saveConfig(silent)
         activeMapFolder     = activeFolder,
     }
 
-    local f = io.open(CONFIG_FILE, 'w')
-    if f then
-        f:write("return " .. serializeValue(allData) .. "\n")
-        f:close()
+    local text = "return " .. serializeValue(allData) .. "\n"
+    local saved = false
+    if core and core.atomicWrite then
+        saved = core.atomicWrite(CONFIG_FILE, text) and true or false
+    else
+        local f = io.open(CONFIG_FILE, 'w')
+        if f then
+            f:write(text)
+            f:close()
+            saved = true
+        end
+    end
+    if saved then
         if not silent then
             print('\ag[MoriAC Map]\ax Settings and zoom saved to ' .. tostring(CONFIG_FILE))
         end

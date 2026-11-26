@@ -1516,27 +1516,51 @@ function AA.scanPlayerAAs(force)
         AA.recordScannedAA(list, foundMap, ctrl.auto_spend_aa_name, nil, nil, nil, true, nil, false)
     end
 
-    -- 5. Scan character AltAbility indices across known ID ranges
-    pcall(function()
-        local function probeRange(startId, endId)
-            for idx = startId, endId do
+    -- 5. Scan character AltAbility indices across known ID ranges. Resumable:
+    -- AA.stepProbe walks AA.PROBE_PER_TICK ids per tick, then finishes the scan.
+    AA.probe = { list = list, foundMap = foundMap, ctx = AA.scanCtx, ri = 1, idx = AA.PROBE_RANGES[1][1] }
+    AA.scanCtx = nil
+    return list
+end
+
+AA.PROBE_RANGES = { {1, 1500}, {4000, 4060}, {5000, 5050}, {8120, 8140}, {17780, 17800} }
+AA.PROBE_PER_TICK = 100
+
+-- Probes up to `budget` ids (nil = all). Returns true once the scan finished.
+function AA.stepProbe(budget)
+    local st = AA.probe
+    if not st then return true end
+    AA.scanCtx = st.ctx
+    local ok = pcall(function()
+        local n = 0
+        while st.ri <= #AA.PROBE_RANGES do
+            local range = AA.PROBE_RANGES[st.ri]
+            while st.idx <= range[2] do
+                if budget and n >= budget then return end
+                local idx = st.idx
+                st.idx = idx + 1
+                n = n + 1
                 local ma = mq.TLO.Me.AltAbility(idx)
                 if ma and ma() then
                     local nm = ma.Name and ma.Name()
                     local r = tonumber(ma.Rank and ma.Rank() or 0) or 0
                     local mr = tonumber(ma.MaxRank and ma.MaxRank() or 0) or 0
                     if nm and nm ~= '' and mr > 0 then
-                        AA.recordScannedAA(list, foundMap, nm, r > 0 and r or nil, mr, nil, true, nil, false)
+                        AA.recordScannedAA(st.list, st.foundMap, nm, r > 0 and r or nil, mr, nil, true, nil, false)
                     end
                 end
             end
+            st.ri = st.ri + 1
+            if AA.PROBE_RANGES[st.ri] then st.idx = AA.PROBE_RANGES[st.ri][1] end
         end
-        probeRange(1, 1500)
-        probeRange(4000, 4060)
-        probeRange(5000, 5050)
-        probeRange(8120, 8140)
-        probeRange(17780, 17800)
     end)
+    -- an error ends the probe, as the old single pcall did
+    if ok and st.ri <= #AA.PROBE_RANGES then
+        AA.scanCtx = nil
+        return false
+    end
+    AA.probe = nil
+    local list, foundMap = st.list, st.foundMap
 
     -- 6. Saved priorities
     if ctrl.auto_aa_priorities then
@@ -1550,7 +1574,7 @@ function AA.scanPlayerAAs(force)
     AA.scanCtx = nil
     AA.scanning = false
     AA.aaFilterDirty = true
-    return list
+    return true
 end
 
 -- Tick side of AA.requestScan.
@@ -1560,9 +1584,20 @@ function AA.runPendingScan()
         AA.lastAAScanAt = 0
         AA.aaFilterDirty = true
         local ok, err = pcall(AA.scanPlayerAAs, true)
-        AA.scanning = false
         AA.scanCtx = nil
-        if not ok then print(string.format('\ar[MoriAC]\ax AA scan failed: %s', tostring(err))) end
+        if not ok then
+            AA.probe = nil
+            AA.scanning = false
+            print(string.format('\ar[MoriAC]\ax AA scan failed: %s', tostring(err)))
+        end
+    elseif AA.probe then
+        local ok, err = pcall(AA.stepProbe, AA.PROBE_PER_TICK)
+        if not ok then
+            AA.probe = nil
+            AA.scanning = false
+            AA.scanCtx = nil
+            print(string.format('\ar[MoriAC]\ax AA scan failed: %s', tostring(err)))
+        end
     end
 end
 
@@ -3530,7 +3565,8 @@ function AA.onCommand(cmd, args)
         AA.specialTabReadDone = false
         AA.pendingReadSpecialTab = true
         if AA.scanPlayerAAs then
-            local ok, err = pcall(AA.scanPlayerAAs, true)
+            local ok, err = pcall(function() AA.scanPlayerAAs(true); AA.stepProbe(nil) end)
+            AA.probe = nil
             AA.scanning = false
             AA.scanCtx = nil
             if ok then

@@ -423,15 +423,21 @@ local function traceDump(reason)
     local name = 'Default'
     pcall(function() local n = mq.TLO.Me.CleanName(); if n and n ~= '' then name = tostring(n) end end)
     local path = string.format('%s/tac_chat_trace_%s.txt', dir, name)
-    local f = io.open(path, 'w')
-    if not f then return end
-    f:write('-- MoriAC Chat draw trace, ' .. os.date() .. '\n-- frame step (oldest first)\n')
+    local parts = { '-- MoriAC Chat draw trace, ' .. os.date() .. '\n-- frame step (oldest first)\n' }
     local count = math.min(t.n, TRACE_MAX)
     for i = t.n - count + 1, t.n do
-        f:write(t.steps[(i - 1) % TRACE_MAX + 1] or '', '\n')
+        parts[#parts + 1] = (t.steps[(i - 1) % TRACE_MAX + 1] or '') .. '\n'
     end
-    f:write('-- ERROR: ' .. tostring(reason) .. '\n')
-    f:close()
+    parts[#parts + 1] = '-- ERROR: ' .. tostring(reason) .. '\n'
+    local text = table.concat(parts)
+    if core and core.atomicWrite then
+        if not core.atomicWrite(path, text) then return end
+    else
+        local f = io.open(path, 'w')
+        if not f then return end
+        f:write(text)
+        f:close()
+    end
     print('\ay[MoriAC Chat]\ax draw trace written to ' .. path)
 end
 

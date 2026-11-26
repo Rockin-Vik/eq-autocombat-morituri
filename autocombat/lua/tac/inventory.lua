@@ -1039,15 +1039,14 @@ function scanner.saveBankCache(bankItems, bankContainers, force, sharedContainer
         return true
     end
     local path = getBankCachePath()
-    local f = io.open(path, 'w')
-    if not f then return false end
-    lastSavedBankSig = sig
+    local parts = {}
+    local function w(str) parts[#parts + 1] = str end
 
-    f:write('-- MoriAC Inventory Bank Cache\n')
-    f:write(string.format('return {\n  syncTime = %q,\n  items = {\n', os.date('%Y-%m-%d %H:%M:%S')))
+    w('-- MoriAC Inventory Bank Cache\n')
+    w(string.format('return {\n  syncTime = %q,\n  items = {\n', os.date('%Y-%m-%d %H:%M:%S')))
     for _, it in ipairs(bankItems) do
         local augStr = invLogic.formatAugs(it):gsub(', ', '|')
-        f:write(string.format('    { id=%d, icon=%d, name=%q, location=%q, slotIndex=%d, subSlot=%s, displayLocation=%q, notifyCmd=%q, count=%d, stackable=%s, stackSize=%d, weight=%.2f, value=%d, type=%q, category=%q, lore=%s, nodrop=%s, tradeskill=%s, clicky=%q, ac=%d, hp=%d, mana=%d, damage=%d, delay=%d, augs=%q },\n',
+        w(string.format('    { id=%d, icon=%d, name=%q, location=%q, slotIndex=%d, subSlot=%s, displayLocation=%q, notifyCmd=%q, count=%d, stackable=%s, stackSize=%d, weight=%.2f, value=%d, type=%q, category=%q, lore=%s, nodrop=%s, tradeskill=%s, clicky=%q, ac=%d, hp=%d, mana=%d, damage=%d, delay=%d, augs=%q },\n',
             it.id or 0,
             it.icon or 0,
             it.name or 'Unknown',
@@ -1075,17 +1074,27 @@ function scanner.saveBankCache(bankItems, bankContainers, force, sharedContainer
             augStr
         ))
     end
-    f:write('  },\n  containers = {\n')
+    w('  },\n  containers = {\n')
     for _, c in ipairs(bankContainers) do
-        f:write(string.format('    { slot=%d, name=%q, capacity=%d, used=%d },\n',
+        w(string.format('    { slot=%d, name=%q, capacity=%d, used=%d },\n',
             c.slot, c.name or '', c.capacity or 0, c.used or 0))
     end
-    f:write('  },\n  sharedContainers = {\n')
+    w('  },\n  sharedContainers = {\n')
     for _, c in ipairs(sharedContainers or {}) do
-        f:write(string.format('    { slot=%d, name=%q, capacity=%d, used=%d },\n',
+        w(string.format('    { slot=%d, name=%q, capacity=%d, used=%d },\n',
             c.slot, c.name or '', c.capacity or 0, c.used or 0))
     end
-    f:write('  }\n}\n')
+    w('  }\n}\n')
+    local text = table.concat(parts)
+    if core and core.atomicWrite then
+        if not core.atomicWrite(path, text) then return false end
+        lastSavedBankSig = sig
+        return true
+    end
+    local f = io.open(path, 'w')
+    if not f then return false end
+    lastSavedBankSig = sig
+    f:write(text)
     f:close()
     return true
 end

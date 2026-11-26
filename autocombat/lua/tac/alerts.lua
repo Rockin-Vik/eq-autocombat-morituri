@@ -87,6 +87,8 @@ local st = {
     flash      = nil,      -- { text, untilAt }
     selected   = 1,        -- trigger open in the settings editor
     fileMode   = {},       -- trigger table -> true while "Sound file" is picked but no file typed yet
+    patBuf     = {},       -- trigger table -> pattern text being typed (applied when the field loses focus)
+    patMsg     = nil,      -- { trig, text } status for a rejected pattern
     player     = nil,      -- false: no PlaySound here (not Windows); else { winmm = lib }
 }
 
@@ -260,12 +262,18 @@ local function unregisterAll()
     st.registered = {}
 end
 
+-- True when the pattern is only wildcards/captures (#*#, #1#, *, spaces): it would match every chat line.
+local function isWildcardOnly(p)
+    return ((p or ''):gsub('#%*#', ''):gsub('#%d+#', ''):gsub('[%*%s]', '')) == ''
+end
+
 local function registerAll()
     unregisterAll()
     st.dirty = false
     if not (mq and mq.event) then return end
     for i, trig in ipairs(cfg.triggers) do
-        if trig.kind == 'chat' and trig.enabled and trig.pattern ~= '' then
+        -- Skip wildcard-only patterns (also ones loaded from old saves): they match every chat line.
+        if trig.kind == 'chat' and trig.enabled and not isWildcardOnly(trig.pattern) then
             local name = 'MoriacAlert_' .. i
             if mq.unevent then pcall(mq.unevent, name) end
             local ok = pcall(mq.event, name, trig.pattern, function(_, a1) fire(trig, a1) end)
@@ -419,10 +427,26 @@ local function drawEditor(trig, i)
     if trig.kind == 'chat' then
         core.formLabel('Chat line')
         ImGui.SetNextItemWidth(core.px(340))
-        local pat = ImGui.InputText('##alrPattern', trig.pattern)
-        if type(pat) == 'string' and pat ~= trig.pattern then trig.pattern = pat; markDirty() end
+        local pat = ImGui.InputText('##alrPattern', st.patBuf[trig] or trig.pattern)
+        if type(pat) == 'string' then st.patBuf[trig] = pat end
         if ImGui.IsItemHovered() then
             core.setTooltip('The text to watch for, as an MQ event pattern.\n#*# matches anything; #1# matches anything and shows it in the alert\n(e.g. "#1# has become ENRAGED.#*#" shows the mob name).')
+        end
+        -- Re-register events only when editing ends, not on every keystroke.
+        local doneOk, done = pcall(ImGui.IsItemDeactivatedAfterEdit)
+        if doneOk and done then
+            local p = st.patBuf[trig] or trig.pattern
+            st.patBuf[trig] = nil
+            if isWildcardOnly(p) then
+                st.patMsg = { trig = trig, text = 'Pattern rejected: it would match every chat line.' }
+            else
+                st.patMsg = nil
+                if p ~= trig.pattern then trig.pattern = p; markDirty() end
+            end
+        end
+        if st.patMsg and st.patMsg.trig == trig then
+            local ERR = (core.colors or {}).ERR or { 0.95, 0.40, 0.40, 1.0 }
+            ImGui.TextColored(ERR[1], ERR[2], ERR[3], ERR[4], st.patMsg.text)
         end
     else
         core.formLabel('Below %')

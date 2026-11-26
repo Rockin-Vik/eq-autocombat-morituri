@@ -86,7 +86,7 @@ local SCOPES             = { 'all', 'zone', 'group' }
 -- ----------------------------------------------------------------------------
 local cfg = {
     acceptCommands  = true,     -- run /ac commands sent by peers
-    acceptSlash     = true,     -- also run other slash commands (/camp, /dzquit ...) sent by peers
+    acceptSlash     = false,    -- also run other slash commands (/camp, /dzquit ...) sent by peers
     trust           = 'all',    -- 'all' (any box on this launcher) | 'allow' (allowlist only)
     allowlist       = {},       -- character names (case-insensitive) when trust == 'allow'
     announce        = true,     -- print received commands to chat
@@ -534,7 +534,9 @@ end
 
 local function isTrusted(sender, payload)
     if cfg.trust ~= 'allow' then return true end
-    local name = (sender and sender.character) or (payload and payload.from) or ''
+    -- Only the transport's sender is authoritative; payload.from is spoofable.
+    local name = sender and sender.character
+    if not name or name == '' then return false end
     name = lower(name)
     for _, allowed in ipairs(cfg.allowlist or {}) do
         if lower(allowed) == name then return true end
@@ -720,13 +722,30 @@ end
 -- "/ac" ("burn on"); any other slash command travels as typed ("/camp") and
 -- the receiver runs it verbatim. Rejects empty lines and anything that would
 -- re-enter the network (loops).
+-- Strips leading command wrappers (/nomodkey, /squelch, /noparse, /docommand, /timed N)
+-- so guards see the command that actually runs.
+local function stripWrappers(line)
+    local rest = line
+    while true do
+        local low, n = rest:lower(), nil
+        if low:match('^/timed%s+%d+%f[%s%z]') then
+            n = (rest:gsub('^%S+%s+%S+%s*', '', 1))
+        elseif low:match('^/nomodkey%f[%s]') or low:match('^/squelch%f[%s]') or low:match('^/noparse%f[%s]')
+            or low:match('^/docommand%f[%s]') then
+            n = (rest:gsub('^%S+%s*', '', 1))
+        end
+        if not n then return rest end
+        rest = n
+    end
+end
+
 local function normalizeLine(line)
     line = tostring(line or ''):gsub('^%s+', ''):gsub('%s+$', '')
     -- Case-insensitive /ac detection (EQ accepts "/AC net ..."), looking past
-    -- a leading /nomodkey, so the nested-net guard below cannot be bypassed.
-    local rest = line
-    if rest:lower():match('^/nomodkey%f[%s]') then rest = rest:gsub('^%S+%s*', '') end
+    -- leading wrappers, so the nested-net guard below cannot be bypassed.
+    local rest = stripWrappers(line)
     local low = rest:lower()
+    if low:match('^/multiline%f[%s%z]') then return nil, '/multiline is not allowed' end
     local isAc = low == '/ac' or low:match('^/ac%f[%s]') ~= nil
     if line:sub(1, 1) == '/' and not isAc then
         return line
@@ -998,6 +1017,13 @@ local function runLines(lines)
     end
 end
 
+-- Never run code-loading, chat, petition or logout commands for a peer.
+-- /timed only lands here when its delay is not numeric (stripWrappers unwraps valid ones).
+local DENIED_VERBS = {}
+for v in ([[/lua /mac /macro /exec /plugin /multiline /docommand /say /tell /t /reply /r /ooc /oo
+    /shout /auction /auc /g /gsay /gu /guildsay /rs /rsay /emote /em /me /yell /petition /bug /report
+    /quit /exit /timed]]):gmatch('%S+') do DENIED_VERBS[v] = true end
+
 local function handleCmd(message, payload, sender)
     local data = payload.data or {}
     local lines = data.lines
@@ -1013,14 +1039,27 @@ local function handleCmd(message, payload, sender)
         replyTo(message, data, 1, { ok = false, reason = reason })
     end
     if not cfg.acceptCommands then return refuse('remote commands disabled') end
+    if not (sender and sender.character) then return refuse('unknown sender') end
     if not isTrusted(sender, payload) then return refuse('not on allowlist') end
 
     -- Re-validate on the receiving side; never trust a peer to have done it.
     local clean, shown = {}, {}
     for _, l in ipairs(lines) do
-        local n = normalizeLine(l)
-        if n and isSlashLine(n) and not cfg.acceptSlash then
-            return refuse('slash commands disabled (' .. n:match('^(%S+)') .. ')')
+        local n, why = normalizeLine(l)
+        if not n and why and why ~= 'empty command' then return refuse(why) end
+        if n and isSlashLine(n) then
+            if not cfg.acceptSlash then
+                return refuse('slash commands disabled (' .. n:match('^(%S+)') .. ')')
+            end
+            local stripped = stripWrappers(n):lower()
+            local verb = stripped:match('^(%S+)') or ''
+            if verb:match('^/%d+$') or DENIED_VERBS[verb] then
+                return refuse('slash command not allowed (' .. verb .. ')')
+            end
+            -- "/ac /ac net ..." would re-enter the network.
+            if verb == '/ac' and (stripped:find('%f[%w]net%f[%W]') or stripped:find('%f[%w]boxnet%f[%W]')) then
+                return refuse('nested net commands are not allowed')
+            end
         end
         if n then
             clean[#clean + 1] = n
@@ -1039,9 +1078,12 @@ end
 local function handleCamp(message, payload, sender)
     local data = payload.data or {}
     local from = (sender and sender.character) or payload.from or '?'
+    -- Only the transport sender is authoritative; payload.from is display-only.
+    local who = sender and sender.character
+    if not who or who == '' then return end
     -- Group-scoped broadcast: silently skip when the sender is not in our
     -- group (same as handleBuffMe; broadcasts carry no rpc to reply to).
-    if data.scope == 'group' and not isGroupMember(from) then return end
+    if data.scope == 'group' and not isGroupMember(who) then return end
     if not isTrusted(sender, payload) or not cfg.acceptCommands then
         replyTo(message, data, 1, { ok = false, reason = 'not trusted' })
         return
@@ -1063,7 +1105,8 @@ end
 
 local function handleBuffMe(message, payload, sender)
     local data = payload.data or {}
-    local from = (sender and sender.character) or payload.from or ''
+    -- Only the transport sender is authoritative; payload.from is spoofable.
+    local from = (sender and sender.character) or ''
     if from == '' then return end
     if data.scope == 'zone' and lower(data.zone) ~= lower(myZone()) then return end
     if data.scope == 'group' and not isGroupMember(from) then return end

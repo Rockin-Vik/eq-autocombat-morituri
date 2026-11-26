@@ -361,17 +361,19 @@ end
 
 local function saveConfig()
     local path = getConfigFilePath()
+    local text = "-- MoriAC DPS Parser Config\nreturn {\n"
+        .. string.format("    compact = %s,\n", tostring(cfg.compact))
+        .. string.format("    combatTimeout = %.1f,\n", cfg.combatTimeout)
+        .. string.format("    reportChannel = %q,\n", cfg.reportChannel)
+        .. string.format("    autoResetOnZone = %s,\n", tostring(cfg.autoResetOnZone))
+        .. string.format("    showPetBreakdown = %s,\n", tostring(cfg.showPetBreakdown))
+        .. string.format("    meterScope = %q,\n", cfg.meterScope)
+        .. string.format("    compactGroup = %s,\n", tostring(cfg.compactGroup))
+        .. "}\n"
+    if core and core.atomicWrite then core.atomicWrite(path, text); return end
     local file = io.open(path, "w")
     if not file then return end
-    file:write("-- MoriAC DPS Parser Config\nreturn {\n")
-    file:write(string.format("    compact = %s,\n", tostring(cfg.compact)))
-    file:write(string.format("    combatTimeout = %.1f,\n", cfg.combatTimeout))
-    file:write(string.format("    reportChannel = %q,\n", cfg.reportChannel))
-    file:write(string.format("    autoResetOnZone = %s,\n", tostring(cfg.autoResetOnZone)))
-    file:write(string.format("    showPetBreakdown = %s,\n", tostring(cfg.showPetBreakdown)))
-    file:write(string.format("    meterScope = %q,\n", cfg.meterScope))
-    file:write(string.format("    compactGroup = %s,\n", tostring(cfg.compactGroup)))
-    file:write("}\n")
+    file:write(text)
     file:close()
 end
 

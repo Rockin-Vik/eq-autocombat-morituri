@@ -61,7 +61,6 @@ local plugin = {
 local REPO            = 'Rockin-Vik/eq-autocombat-morituri'
 local RAW_BASE        = 'https://raw.githubusercontent.com/' .. REPO .. '/main/'
 local MANIFEST_URL    = RAW_BASE .. 'update_manifest.txt'
-local FILE_BASE       = RAW_BASE .. 'autocombat/'
 local REPO_URL        = 'https://github.com/' .. REPO
 local USER_AGENT      = 'MoriAC-Updater'
 local STARTUP_DELAY_S = 20        -- first automatic check this long after load
@@ -711,7 +710,10 @@ local function dropLock() os.remove(lockPath()) end
 
 local function startDownload(i)
     local f = st.result.changed[i]
-    local ok, why = httpBegin(FILE_BASE .. f.path)
+    -- Pin downloads to the manifest's commit so files match the CRCs; main if it has none.
+    local ref = st.result.commit
+    if type(ref) ~= 'string' or not ref:match('^[%w%._%-]+$') then ref = 'main' end
+    local ok, why = httpBegin('https://raw.githubusercontent.com/' .. REPO .. '/' .. ref .. '/autocombat/' .. f.path)
     if not ok then failPhase(why); return end
     st.dlIndex = i
 end

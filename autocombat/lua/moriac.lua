@@ -2713,19 +2713,21 @@ function runtime.zoneListFor(store, create)
 end
 
 -- Unique NPC names currently spawned in this zone, as a sorted array of
--- { name =, count = }. Cached ~1.5s and dropped on zone change: the sweep is one
--- NearestSpawn lookup per NPC, so it only runs while the picker popup is open.
+-- { name =, count = }. Cached ~1.5s and dropped on zone change: the sweep walks
+-- every spawn, so it only runs while the picker popup is open.
 function runtime.zoneNpcNames()
     local now = os.clock()
     local zs = runtime.curZoneShort()
     local c = runtime.zoneNpcCache
     if c and c.zone == zs and (now - c.at) < 1.5 then return c.list end
     local counts, list = {}, {}
-    local n = 0
-    pcall(function() n = mq.TLO.SpawnCount('npc')() or 0 end)
-    for i = 1, math.min(n, 800) do
+    -- One spawn-list pass instead of a sorted NearestSpawn search per NPC;
+    -- order is irrelevant (counted, then sorted by name).
+    local spawns = {}
+    pcall(function() spawns = mq.getFilteredSpawns(function(sp) return sp.Type() == 'NPC' end) or {} end)
+    for i = 1, math.min(#spawns, 800) do
         local nm
-        pcall(function() nm = mq.TLO.NearestSpawn(i, 'npc').CleanName() end)
+        pcall(function() nm = spawns[i].CleanName() end)
         if nm and nm ~= '' and nm ~= 'NULL' then
             if not counts[nm] then
                 counts[nm] = { name = nm, count = 0 }
@@ -3009,12 +3011,8 @@ end
 -- isHostileTarget() already covers the friendly / dead / type checks.
 local function isXTargetId(id)
     if not id or id <= 0 then return false end
-    for i = 1, 13 do
-        local xt = mq.TLO.Me.XTarget(i)
-        if xt() and (xt.ID() or 0) == id then
-            return isHostileTarget(id) and not isIgnored(xt.CleanName()) and xtSlotCounts(xt, id)
-        end
-    end
+    local row = runtime.xtSnapshot().byId[id] -- first slot holding id, as the old 1..13 scan
+    if row then return row.hostile and not row.ignored end
     return false
 end
 
@@ -3160,12 +3158,10 @@ function runtime.findFirstNPCXtarget(unmezzedOnly, isIgnoredFn, isUnreachableFn,
     local myZ = mq.TLO.Me.Z() or 0
     local chosenId, lowestHp = nil, 101
     pcall(function()
-        local slots = mq.TLO.Me.XTargetSlots() or 13
-        for i = 1, slots do
-            local xt = mq.TLO.Me.XTarget(i)
-            if xt() then
-                local id = xt.ID() or 0
-                if id > 0 and isHostileTarget(id) and xtSlotCounts(xt, id) then
+        for _, row in ipairs(runtime.xtSnapshot().rows) do
+            do
+                local id = row.id
+                if row.hostile then
                     local s = mq.TLO.Spawn(id)
                     if s() then
                         local cname = s.CleanName() or ''
@@ -4077,9 +4073,10 @@ function runtime.tryMem(slot, spellName, bypassCheck)
             return false
         end
     end
+    local memDeadline = mq.gettime() + 15000
     while mq.TLO.Window('CastingWindow').Open() do
         mq.delay(100)
-        if runtime.hasDowntimeAggroThreat and runtime.hasDowntimeAggroThreat() then
+        if mq.gettime() > memDeadline or (runtime.hasDowntimeAggroThreat and runtime.hasDowntimeAggroThreat()) then
             if SBW().Open() then mq.cmd('/book 0') end
             clearCursor()
             return false
@@ -6040,8 +6037,8 @@ function runtime.loadAll()
                 end
             end
         end
-        -- A save whose final rename failed leaves the only good copy in .tmp.
-        for _, p in ipairs({ path, path .. '.tmp' }) do
+        -- .tmp is the newest complete copy if a save died mid-rotate; then .bak.
+        for _, p in ipairs({ path, path .. '.tmp', path .. '.bak' }) do
             local fn = loadfile(p)
             if fn then
                 local ok, t2 = pcall(fn)
@@ -6098,6 +6095,35 @@ end
 -- silent saves are therefore coalesced: the first one lands, the rest just
 -- mark the loadout dirty so the main loop's 1.5 s autosave writes the final
 -- value.
+-- Crash-safe file replace: write+close path.tmp, rotate path -> path.bak,
+-- rename tmp -> path (restoring .bak on failure). Loader tries .tmp then .bak.
+function runtime.atomicWrite(path, text)
+    if type(path) ~= 'string' or path == '' then return false, 'bad path' end
+    local tmpPath, bakPath = path .. '.tmp', path .. '.bak'
+    local f, oerr = io.open(tmpPath, 'wb')
+    if not f then return false, 'cannot open ' .. tmpPath .. ': ' .. tostring(oerr) end
+    local okW, werr = f:write(tostring(text or ''))
+    local okC, cerr = f:close()
+    if not okW or not okC then
+        os.remove(tmpPath)
+        return false, 'write failed: ' .. tostring(werr or cerr)
+    end
+    -- New data is safely in .tmp; only now rotate the old file to .bak.
+    local old = io.open(path, 'rb')
+    if old then
+        old:close()
+        os.remove(bakPath)
+        os.rename(path, bakPath)
+    end
+    local okMove, merr = os.rename(tmpPath, path)
+    if not okMove then
+        local cur = io.open(path, 'rb')
+        if cur then cur:close() else os.rename(bakPath, path) end
+        return false, 'cannot replace ' .. path .. ': ' .. tostring(merr)
+    end
+    return true
+end
+
 runtime.saveLoadout = function(silent, force)
     local nowSave = os.clock()
     if silent and not force and runtime.lastSaveAt and (nowSave - runtime.lastSaveAt) < 0.5 then
@@ -6120,28 +6146,16 @@ runtime.saveLoadout = function(silent, force)
     ALLDATA.__zoneWaypointPresets = ctrl.zone_waypoint_presets
     -- Write to a temp file and rename over the real one so a serialize error
     -- or a crash mid-write can never leave a truncated loadout behind.
-    local path = runtime.loadoutFilePath()
-    local tmpPath = path .. '.tmp'
-    local f, oerr = io.open(tmpPath, 'w')
-    if not f then
-        print('\ar[MoriAC]\ax failed to save loadout (cannot open ' .. tostring(tmpPath) .. '): ' .. tostring(oerr))
+    local buf = { 'return ' }
+    local sink = { write = function(_, str) buf[#buf + 1] = str end }
+    local okSer, serr = pcall(serialize, ALLDATA, sink, 1)
+    if not okSer then
+        print('\ar[MoriAC]\ax failed to save loadout: ' .. tostring(serr))
         return
     end
-    local okWrite, werr = pcall(function()
-        f:write('return '); serialize(ALLDATA, f, 1)
-    end)
-    f:close()
-    if not okWrite then
-        os.remove(tmpPath)
-        print('\ar[MoriAC]\ax failed to save loadout: ' .. tostring(werr))
-        return
-    end
-    -- os.rename won't overwrite on Windows, so drop the old file first; if that
-    -- fails leave the temp file in place rather than losing the save.
-    os.remove(path)
-    local okMove, merr = os.rename(tmpPath, path)
+    local okMove, merr = runtime.atomicWrite(runtime.loadoutFilePath(), table.concat(buf))
     if not okMove then
-        print('\ar[MoriAC]\ax failed to replace loadout file: ' .. tostring(merr))
+        print('\ar[MoriAC]\ax failed to save loadout: ' .. tostring(merr))
         return
     end
     if runtime.pluginManager and runtime.pluginManager.onLoadoutSaved then
@@ -7522,7 +7536,9 @@ function runtime.initPluginManager()
             log                   = tlog,
             DATA                  = DATA,
             saveLoadout           = runtime.saveLoadout,
-            colors                = { GOLD = GOLD, ARC = ARC, MUTED = MUTED, GOOD = GOOD, WARN = WARN, ERR = ERR },
+            -- crash-safe replace: path.bak backup, write path.tmp, rename over path
+            atomicWrite           = function(path, text) return runtime.atomicWrite(path, text) end,
+            colors               = { GOLD = GOLD, ARC = ARC, MUTED = MUTED, GOOD = GOOD, WARN = WARN, ERR = ERR },
             pushTheme             = UI.pushTheme,
             popTheme              = UI.popTheme,
             accent                = UI.accent,
@@ -7736,6 +7752,7 @@ function runtime.initPluginManager()
         print(string.format('\ar[MoriAC Plugin Error]\ax %s: %s', filename, tostring(msg)))
         pm.loadErrors[filename] = { msg = tostring(msg), fullPath = fullPath, at = os.clock() }
         pm.scripts[filename] = nil
+        pm.listVer = (pm.listVer or 0) + 1 -- invalidates the Plugins page sorted lists
         return false, tostring(msg)
     end
 
@@ -7770,6 +7787,7 @@ function runtime.initPluginManager()
             at = os.clock(),
         }
         pm.loadErrors[filename] = nil
+        pm.listVer = (pm.listVer or 0) + 1 -- invalidates the Plugins page sorted lists
         print(string.format('\ay[MoriAC]\ax %s is not a MoriAC plugin (%s). Listed under Setup -> Plugins -> Standalone Scripts; run it with /lua run %s.',
             filename, tostring(reason), runName))
         return false, tostring(reason)
@@ -7952,7 +7970,14 @@ function runtime.initPluginManager()
         end
         pm.loadErrors[filename] = nil
         pm.scripts[filename] = nil
+        pm.listVer = (pm.listVer or 0) + 1 -- invalidates the Plugins page sorted lists
 
+        -- Reusing a live record: tear the old instance down first so its
+        -- onInit side effects don't leak, and let enablePlugin init the new one.
+        if existing and existing.enabled and existing.instance and existing.instance.onDestroy then
+            pcall(existing.instance.onDestroy)
+        end
+        if existing then existing.enabled = false; existing.thread = nil end
         local p = existing or {
             id = id,
             lastExecMs = 0,
@@ -8018,6 +8043,8 @@ function runtime.initPluginManager()
         if pm.invalidateHeaderButtons then pm.invalidateHeaderButtons() end
         local p = pm.plugins[id]
         if not p then return end
+        -- a second onInit would double-register the plugin's events/threads
+        if p.enabled and p.status == 'Active' then return end
 
         p.enabled = true
         p.status = 'Active'
@@ -8098,6 +8125,7 @@ function runtime.initPluginManager()
         pm.pluginOrder = {}
         pm.loadErrors = {}
         pm.scripts = {}
+        pm.listVer = (pm.listVer or 0) + 1 -- invalidates the Plugins page sorted lists
         pm.discover()
     end
 
@@ -8713,9 +8741,7 @@ end
 -- Setup -> Update: the Updater plugin's panel on its own page, so checking
 -- and installing is one click away instead of under Plugins -> Config.
 function UI.drawUpdateTab()
-    if not runtime.pluginManager then
-        runtime.initPluginManager()
-    end
+    -- pm is created once at startup (runtime.initPluginManager in main), never from draw
     local pm = runtime.pluginManager
     if not pm then return end
     ImGui.PushTextWrapPos(0)
@@ -8727,9 +8753,7 @@ function UI.drawUpdateTab()
 end
 
 function UI.drawPluginsTab()
-    if not runtime.pluginManager then
-        runtime.initPluginManager()
-    end
+    -- pm is created once at startup (runtime.initPluginManager in main), never from draw
     local pm = runtime.pluginManager
     if not pm then return end
 
@@ -8762,18 +8786,25 @@ function UI.drawPluginsTab()
         end
     end
 
-    local failedFiles = {}
-    for fname, info in pairs(pm.loadErrors or {}) do
-        failedFiles[#failedFiles + 1] = { file = fname, info = info }
-    end
-    table.sort(failedFiles, function(a, b) return a.file:lower() < b.file:lower() end)
+    -- Sorted once per pm.listVer bump (every pm.loadErrors / pm.scripts change).
+    local lc = pm.sortedListsCache
+    if not lc or lc.ver ~= (pm.listVer or 0) then
+        local failedFiles = {}
+        for fname, info in pairs(pm.loadErrors or {}) do
+            failedFiles[#failedFiles + 1] = { file = fname, info = info }
+        end
+        table.sort(failedFiles, function(a, b) return a.file:lower() < b.file:lower() end)
 
-    local scriptFiles = {}
-    for fname, entry in pairs(pm.scripts or {}) do
-        scriptFiles[#scriptFiles + 1] = entry
-        entry.file = entry.file or fname
+        local scriptFiles = {}
+        for fname, entry in pairs(pm.scripts or {}) do
+            scriptFiles[#scriptFiles + 1] = entry
+            entry.file = entry.file or fname
+        end
+        table.sort(scriptFiles, function(a, b) return a.name:lower() < b.name:lower() end)
+        lc = { ver = pm.listVer or 0, failed = failedFiles, scripts = scriptFiles }
+        pm.sortedListsCache = lc
     end
-    table.sort(scriptFiles, function(a, b) return a.name:lower() < b.name:lower() end)
+    local failedFiles, scriptFiles = lc.failed, lc.scripts
 
     ImGui.SameLine()
     ImGui.TextColored(ARC[1], ARC[2], ARC[3], ARC[4], string.format('Loaded: %d | Active: %d', totalLoaded, activeCount))
@@ -8795,6 +8826,7 @@ function UI.drawPluginsTab()
     -- Tight rows for every table on this page.
     ImGui.PushStyleVar(ImGuiStyleVar.CellPadding, 4, 1)
     ImGui.PushStyleVar(ImGuiStyleVar.FramePadding, 3, 1)
+    local okBody, stop = xpcall(function()
     local tblFlags = bit.bor(ImGuiTableFlags.Borders, ImGuiTableFlags.RowBg, ImGuiTableFlags.Resizable, ImGuiTableFlags.SizingFixedFit)
 
     -- Files in the plugin folder that are not loadable plugins (syntax errors,
@@ -8812,6 +8844,7 @@ function UI.drawPluginsTab()
                 ImGui.SameLine()
                 if ImGui.SmallButton(string.format('Dismiss##dismissPlg_%d', i)) then
                     pm.loadErrors[entry.file] = nil
+                    pm.listVer = (pm.listVer or 0) + 1 -- invalidates the Plugins page sorted lists
                 end
                 ImGui.SameLine()
                 ImGui.TextColored(MUTED[1], MUTED[2], MUTED[3], MUTED[4], tostring(entry.info.msg or ''))
@@ -8904,10 +8937,9 @@ function UI.drawPluginsTab()
     end
 
     if totalLoaded == 0 then
-        ImGui.PopStyleVar(2)
         ImGui.TextColored(WARN[1], WARN[2], WARN[3], WARN[4], 'No plugins found in ' .. tostring(dirStr) .. '.')
         ImGui.TextColored(MUTED[1], MUTED[2], MUTED[3], MUTED[4], 'Drop any compatible .lua plugin into the folder and click "Rescan".')
-        return
+        return true
     end
 
     -- One line per plugin. Status is the name colour (details in the
@@ -8944,6 +8976,8 @@ function UI.drawPluginsTab()
                             pm.disablePlugin(id)
                         end
                         p.pendingEnabled = nil
+                        local cur = pm.plugins[id]  -- record may have been replaced meanwhile
+                        if cur then cur.pendingEnabled = nil end
                         runtime.saveLoadout(true)
                     end)
                 end
@@ -9118,7 +9152,10 @@ function UI.drawPluginsTab()
 
         ImGui.EndTable()
     end
-    ImGui.PopStyleVar(2)
+    end, debug.traceback)
+    ImGui.PopStyleVar(2) -- always balanced, even if the body errored
+    if not okBody then error(stop, 0) end -- shown by UI.guardedDraw
+    if stop then return end
 
     -- Plugin Configuration Modal Popup Dialog
     if pm.openConfigRequested then
@@ -9152,6 +9189,8 @@ function UI.drawPluginsTab()
                 pm.defer((newEn and 'enable ' or 'disable ') .. modalId, function()
                     if newEn then pm.enablePlugin(modalId) else pm.disablePlugin(modalId) end
                     p.pendingEnabled = nil
+                    local cur = pm.plugins[modalId]  -- record may have been replaced meanwhile
+                    if cur then cur.pendingEnabled = nil end
                     runtime.saveLoadout(true)
                 end)
             end
@@ -10432,13 +10471,13 @@ function UI.drawCatalogPage(spec)
     if UI.drawRuleEditor(entry, spec.opts(selRow, entry)) then runtime.saveLoadout(true) end
 end
 
--- Rows are rebuilt at most once a second (they walk DATA and query skills /
+-- Rows are rebuilt at most every 15 s (they walk DATA and query skills /
 -- AAs / discs per row); `sig` forces a rebuild when the filter changes.
 function UI.cachedRows(key, sig, build)
     runtime.catalogRows = runtime.catalogRows or {}
     local c = runtime.catalogRows[key]
     local now = os.clock()
-    if not c or c.sig ~= sig or (now - c.at) >= 1.0 then
+    if not c or c.sig ~= sig or (now - c.at) >= 15.0 then
         c = { at = now, sig = sig, rows = build() }
         runtime.catalogRows[key] = c
     end
@@ -15674,7 +15713,7 @@ function UI.drawMiniGui()
         return
     end
 
-    if show then
+    if show then UI.guardedDraw(function()
         UI.postBeginWindow('mini')
         local x0 = nil
         pcall(function()
@@ -15710,7 +15749,7 @@ function UI.drawMiniGui()
         if x0 and runtime.miniFrameMaxX then
             runtime.miniRowWidth = math.floor(runtime.miniFrameMaxX - x0 + 0.5)
         end
-    end
+    end) end
 
     UI.preEndWindow('mini', true)
     ImGui.End()
@@ -15998,6 +16037,21 @@ function UI.drawSidebar()
     end
 end
 
+-- Runs a draw section under xpcall so the caller's End/EndChild/popTheme
+-- always run; on error shows the message in place and logs each distinct
+-- message once.
+function UI.guardedDraw(fn)
+    local ok, err = xpcall(fn, debug.traceback)
+    if ok then return end
+    local msg = tostring(err)
+    runtime.drawErrorsSeen = runtime.drawErrorsSeen or {}
+    if not runtime.drawErrorsSeen[msg] then
+        runtime.drawErrorsSeen[msg] = true
+        print('\ar[MoriAC]\ax UI draw error: ' .. msg)
+    end
+    pcall(ImGui.TextColored, 1, 0.3, 0.3, 1, 'UI error: ' .. (msg:match('^[^\n]*') or msg))
+end
+
 function UI.drawActivePage()
     local p = UI.currentPage()
     accent(GOLD, p.label)
@@ -16032,18 +16086,20 @@ function UI.drawFullGui()
     end
     UI.postBeginWindow('main')
 
-    UI.updateTracker()
-    UI.drawCommandBar()
-    UI.drawStatusLine()
-    UI.drawIssuesStrip()
+    UI.guardedDraw(function()
+        UI.updateTracker()
+        UI.drawCommandBar()
+        UI.drawStatusLine()
+        UI.drawIssuesStrip()
+    end)
     ImGui.Separator()
 
     ImGui.BeginChild('##tacSidebar', UI.px(150), 0, true)
-    UI.drawSidebar()
+    UI.guardedDraw(UI.drawSidebar)
     ImGui.EndChild()
     ImGui.SameLine()
     ImGui.BeginChild('##tacPage', 0, 0, false, ImGuiWindowFlags and ImGuiWindowFlags.HorizontalScrollbar or 0)
-    UI.drawActivePage()
+    UI.guardedDraw(UI.drawActivePage)
     ImGui.EndChild()
 
     UI.preEndWindow('main')
@@ -18822,12 +18878,13 @@ mq.event('TriuneNoTakeHold3', '#*#Your spell would not have taken hold#*#', func
 -- #1# here is a phrase ("changes in its attack speed", "snare spells"), not a spell name
 mq.event('TriuneImmuneSpell1', 'Your target is immune to #*#', function() onFailureEvent('target immune') end)
 mq.event('TriuneImmuneSpell2', '#*#Your target cannot be mezzed#*#', function() onFailureEvent('target immune') end)
-mq.event('TriuneDeadTargetSpell', '#*#dead target#*#', function() onFailureEvent('dead target') end)
-mq.event('TriuneCantCast', '#*#cast spells while#*#', function() onFailureEvent('cannot cast') end)
+mq.event('TriuneDeadTargetSpell', 'You cannot#*#dead target#*#', function() onFailureEvent('dead target') end)
+mq.event('TriuneCantCast', "You can't cast spells while#*#", function() onFailureEvent('cannot cast') end)
+mq.event('TriuneCantCast2', 'You cannot cast spells while#*#', function() onFailureEvent('cannot cast') end)
 mq.event('TriuneResisted1', '#1# resisted your #2#!', function(_, tgt, sp) onFailureEvent('resisted', sp) end)
 mq.event('TriuneResisted2', 'Your target resisted the #1# spell.#*#', function(_, sp) onFailureEvent('resisted', sp) end)
-mq.event('TriuneNotReady', '#*#not ready#*#', function() onFailureEvent('not ready') end)
-mq.event('TriuneNoMana', '#*#enough mana#*#', function() onFailureEvent('insufficient mana') end)
+mq.event('TriuneNotReady', 'Spell recast time not yet met#*#', function() onFailureEvent('not ready') end)
+mq.event('TriuneNoMana', 'Insufficient Mana to cast this spell#*#', function() onFailureEvent('insufficient mana') end)
 mq.event('TriunePetExists1', '#*#cannot have more than one pet#*#', function() onPetSummonRefused() end)
 mq.event('TriunePetExists2', '#*#already have a pet#*#', function() onPetSummonRefused() end)
 
@@ -18905,6 +18962,21 @@ function runtime.bar2NoteCasting()
     end
 end
 
+-- Base mana cost / duration (ticks) are static spell data; cached per name
+-- so castGem does not re-query them every tick. Only valid spells are cached.
+function runtime.spellStatic(name, sp)
+    runtime.spellStaticCache = runtime.spellStaticCache or {}
+    local c = runtime.spellStaticCache[name]
+    if c then return c end
+    sp = sp or mq.TLO.Spell(name)
+    if not sp() then return { mana = 0, dur = 0 } end
+    local dur = 0
+    pcall(function() dur = tonumber(sp.Duration()) or 0 end)
+    c = { mana = tonumber(sp.Mana() or 0) or 0, dur = tonumber(dur) or 0 }
+    runtime.spellStaticCache[name] = c
+    return c
+end
+
 function runtime.castGem(i, g, id)
     local isFD = isFeignDeathAbility(g and g.spell)
     if isFD then runtime.ownFeignAt = os.clock() end
@@ -18939,7 +19011,8 @@ function runtime.castGem(i, g, id)
         isMemmed = bar2 ~= nil
     end
     if not isMemmed then return false end -- not memmed
-    local spMana = tonumber(sp.Mana() or 0) or 0
+    local spStatic = runtime.spellStatic(g.spell, sp)
+    local spMana = spStatic.mana
     local curMana = tonumber(mq.TLO.Me.CurrentMana() or 0) or 0
     if curMana < spMana then return false end
     local isHeal = runtime.isHealAction(g.spell, g.target, g)
@@ -18952,18 +19025,17 @@ function runtime.castGem(i, g, id)
         return false
     end
 
-    local dur = 0
-    pcall(function() dur = tonumber(sp.Duration()) or 0 end)
-    dur = tonumber(dur) or 0
+    local dur = spStatic.dur
     if dur > 0 and buffActive(id, g.spell) and not bardKeepSinging(g) then
         return false
     end
 
-    if id and id > 0 and id ~= mq.TLO.Me.ID() and not runtime.isTargetInRange(g.spell, id) then
+    local myId = mq.TLO.Me.ID()
+    if id and id > 0 and id ~= myId and not runtime.isTargetInRange(g.spell, id) then
         return false
     end
 
-    local selfCast = (id == mq.TLO.Me.ID())
+    local selfCast = (id == myId)
     local orig = mq.TLO.Target.ID() or 0
     local wasAttacking = mq.TLO.Me.Combat()
     local hostileTarget = (orig > 0 and isHostileTarget and isHostileTarget(orig)) == true
@@ -19029,7 +19101,7 @@ function runtime.castGem(i, g, id)
 
         local durSec = 0
         pcall(function()
-            local d = mq.TLO.Spell(g.spell).Duration() or 0
+            local d = runtime.spellStatic(g.spell).dur
             if d and tonumber(d) then durSec = math.floor(tonumber(d) * 6) end
         end)
         if durSec > 0 then
@@ -21077,11 +21149,11 @@ end
 mq.event('MoriacSummoned', '#*#You have been summoned!#*#', function() runtime.lureSummonedAt = os.clock() end)
 mq.event('MoriacEnrageOn', '#1# has become ENRAGED.#*#', function(_, n) runtime.noteEnrage(n, true) end)
 mq.event('MoriacEnrageOff', '#1# is no longer enraged.#*#', function(_, n) runtime.noteEnrage(n, false) end)
-mq.event('TriuneTooFar1', 'Your target is too far away#*#', function() repositionCloser() end)
-mq.event('TriuneTooFar1b', 'You are too far away#*#', function() repositionCloser() end)
-mq.event('TriuneTooFar2', 'Your target is out of range, get closer#*#', function() repositionCloser() end)
-mq.event('TriuneTooFar3', 'You cannot reach#*#', function() repositionCloser() end)
-mq.event('TriuneTooFar3b', 'You can\'t reach#*#', function() repositionCloser() end)
+mq.event('TriuneTooFar1', 'Your target is too far away#*#', function() runtime.repositionPending = true end)
+mq.event('TriuneTooFar1b', 'You are too far away#*#', function() runtime.repositionPending = true end)
+mq.event('TriuneTooFar2', 'Your target is out of range, get closer#*#', function() runtime.repositionPending = true end)
+mq.event('TriuneTooFar3', 'You cannot reach#*#', function() runtime.repositionPending = true end)
+mq.event('TriuneTooFar3b', 'You can\'t reach#*#', function() runtime.repositionPending = true end)
 mq.event('TriuneCantHit1', 'You cannot hit #*#from here#*#', function() handleCantHitFromHere() end)
 mq.event('TriuneCantHit2', 'You can\'t hit #*#from here#*#', function() handleCantHitFromHere() end)
 mq.event('TriuneCantHit3', 'Your target is not in line of sight#*#', function() handleCantHitFromHere() end)
@@ -24734,6 +24806,11 @@ end
 
 local function combatTick()
     runtime.wpBeginTick()
+    -- "too far" events only flag; the reposition runs here, once per tick.
+    if runtime.repositionPending then
+        runtime.repositionPending = false
+        repositionCloser()
+    end
     local fullStop = runtime.fullStop
     local anyXtarAlive = runtime.anyXtarAlive
     local countNPCXtarget = runtime.countNPCXtarget
@@ -24778,6 +24855,9 @@ local function combatTick()
             runtime.discExpires = {}
             runtime.discCooldown = {}
             runtime.aaEffectUntil = {}
+            runtime.pendingMem = {}  -- table: main loop calls next() on it
+            runtime.pendingBardSong = nil
+            runtime.pendingDowntimeReady = nil
             petState.myPets = {}; petState.lastObservedId = 0; petState.summonPending = nil; petState.petsCache = nil
             print('\ar[MoriAC]\ax character is dead -- paused. Will resume automatically once alive again.')
         end
@@ -27398,8 +27478,9 @@ local function runMainLoop()
                 memmed = true
             end
         end
-        if ctrl.running and not memmed and (os.clock() - runtime.lastTick) > 0.4 then
+        if ctrl.running and not memmed and (os.clock() - runtime.lastTick) >= 0.2 then
             local ctT0 = os.clock()
+            runtime.lastTick = ctT0 -- interval measured start-to-start
             local ok, err = pcall(combatTick)
             local ctMs = (os.clock() - ctT0) * 1000
             runtime.combatTickMs = ctMs
@@ -27414,7 +27495,6 @@ local function runMainLoop()
                     runtime.pluginManager.onCombatTick(tId)
                 end)
             end
-            runtime.lastTick = os.clock()
             runtime.wasRunning = true
         elseif not ctrl.running then
             if runtime.wasRunning then

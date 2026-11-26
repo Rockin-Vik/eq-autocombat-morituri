@@ -411,9 +411,12 @@ local function resolveSongSlotMax(mq)
 end
 
 local function sortEffects(list, sortMode)
+    -- lowercase name computed once per entry, not per comparison
+    local lname = {}
+    for _, e in ipairs(list) do lname[e] = (e.name or ''):lower() end
     if sortMode == 'Name (A-Z)' then
         table.sort(list, function(a, b)
-            return (a.name or ''):lower() < (b.name or ''):lower()
+            return lname[a] < lname[b]
         end)
     elseif sortMode == 'Time Left (Ascending)' then
         table.sort(list, function(a, b)
@@ -425,7 +428,7 @@ local function sortEffects(list, sortMode)
             if aTimed and bTimed then
                 if a.duration ~= b.duration then return a.duration < b.duration end
             end
-            return (a.name or ''):lower() < (b.name or ''):lower()
+            return lname[a] < lname[b]
         end)
     elseif sortMode == 'Time Left (Descending)' then
         table.sort(list, function(a, b)
@@ -437,7 +440,7 @@ local function sortEffects(list, sortMode)
             if aTimed and bTimed then
                 if a.duration ~= b.duration then return a.duration > b.duration end
             end
-            return (a.name or ''):lower() < (b.name or ''):lower()
+            return lname[a] < lname[b]
         end)
     elseif sortMode == 'Buff Type' then
         -- 1 = Detrimental, 2 = Songs/Discs, 3 = Timed Buffs, 4 = Permanent Buffs
@@ -457,7 +460,7 @@ local function sortEffects(list, sortMode)
             if aTimed and bTimed then
                 if a.duration ~= b.duration then return a.duration < b.duration end
             end
-            return (a.name or ''):lower() < (b.name or ''):lower()
+            return lname[a] < lname[b]
         end)
     elseif sortMode == 'Slot Order' then
         table.sort(list, function(a, b)

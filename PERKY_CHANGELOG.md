@@ -11,6 +11,19 @@ Unless a change says otherwise, Morituri behaves exactly as before. Code that di
 - `#attackmode` doesn't exist. Bows fire with the normal `/autofire`.
 - `#nms` and the `kratos` buff NPC are Morituri-only.
 
+## 2026-11-25 (4)
+
+- **Boxnet is safer by default.** Peers can no longer make your boxes run plain slash commands unless you turn "also run slash commands" on. Even then, code-loading, chat, petition and logout commands (`/lua`, `/mac`, `/say`, `/tell`, `/ooc`, `/1`, `/quit` and similar) are always refused, also when wrapped in `/nomodkey`, `/squelch`, `/noparse`, `/timed N` or `/docommand`. Nested `/ac net` and `/multiline` are refused. Only the transport's sender name is trusted.
+- **Spell memorising can no longer hang MoriAC.** Waiting for the casting window now gives up after 15 seconds.
+- **Player chat can no longer trigger cast lockouts.** The "not ready", "insufficient mana" and "can't cast while" events now match only EQ's own system messages.
+- **Saves are crash-safe.** Loadouts and the DPS, map, inventory and chat-trace files are written to a temp file and renamed into place, keeping a `.bak`. Loadouts load from `.tmp`/`.bak` if the main file is missing.
+- **A UI error no longer freezes the game.** Page draws in the main and mini windows are guarded; an error shows in the window and is logged once.
+- **Plugin fixes.** Enabling an enabled plugin does nothing; reloading calls the old instance's cleanup first. The Plugins/Update pages no longer start the plugin manager while drawing.
+- **Death clears pending memorise, bard song and downtime steps.**
+- **Alerts:** pattern edits apply when you leave the field; patterns that match every line (`#*#`, `#1#`, `*`) are rejected or skipped.
+- **Updater downloads files from the exact commit in the manifest.**
+- **Performance:** combat tick every 0.2 s measured from tick start; reposition after "too far" runs in the combat tick; fewer XTarget and spawn lookups; spell mana/duration cached; AA/ability rows rebuilt every 15 s instead of 1 s; AA ID scan spread over ticks; cheaper sorts on the Plugins page and HUD effects.
+
 ## 2026-11-25 (3): Settings files get the server name on Perky
 
 - **Problem:** on Perky, `EverQuest.ServerName` and `Zone.Server` come back empty, so every character's settings went to `moriac_loadout__<char>.lua`. A character with the same name on another server that also reports an empty name would share the file, and the camp-to-another-server reload couldn't tell the servers apart.
