@@ -2,6 +2,10 @@
 
 > **Morituri Auto Combat (MoriAC)** is a fork of Triune AutoCombat for Project Morituri. Entries above the upstream `2026-10-11` section are fork changes; everything below them is upstream history.
 
+## 2026-11-25 (2)
+
+- **`/lua run mac` no longer freezes the game.** The short-name launcher started MoriAC with `dofile`, which MacroQuest's Lua cannot pause through, so MoriAC never gave a frame back to the game. It now loads MoriAC as a normal Lua call. `/lua run moriac` was not affected.
+
 ## 2026-11-25
 
 - **Runs on servers other than Morituri (made for Perky Crew).** Morituri-only server commands now only happen on Morituri: the `/say kratos` timer is no longer a default elsewhere, NMS Loot (`#nms`) starts off elsewhere, and Ranged style and bow pulls use `/autofire` instead of `#attackmode`. Camping to another server now reloads that server's settings, even with the same character name.

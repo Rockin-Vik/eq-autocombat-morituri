@@ -1,10 +1,10 @@
 # MoriAC update manifest, written by dev/publish.sh. Read by lua/tac/update_check.lua.
-version=2026.11.25.0100
+version=2026.11.25.0200
 date=2026-11-25
 commit=b2812b2
 file=config/moriac_alarm.wav 52962 7ab5ae2a
 file=config/moriac_data.lua 140000 b5906915
-file=lua/mac.lua 310 089d668c
+file=lua/mac.lua 505 729689e2
 file=lua/moriac.lua 1238459 8d5d08b4
 file=lua/tac/alerts.lua 24769 c9f9979a
 file=lua/tac/auto_aa.lua 163595 ab7c4329
@@ -34,6 +34,10 @@ file=lua/tac/timers.lua 14585 2da193f3
 file=lua/tac/tradeskill.lua 40899 ab8cb26d
 file=lua/tac/triune_log.lua 15583 576465e8
 file=lua/tac/update_check.lua 48330 307e753c
+note=## 2026-11-25 (2)
+note=
+note=- **`/lua run mac` no longer freezes the game.** The short-name launcher started MoriAC with `dofile`, which MacroQuest's Lua cannot pause through, so MoriAC never gave a frame back to the game. It now loads MoriAC as a normal Lua call. `/lua run moriac` was not affected.
+note=
 note=## 2026-11-25
 note=
 note=- **Runs on servers other than Morituri (made for Perky Crew).** Morituri-only server commands now only happen on Morituri: the `/say kratos` timer is no longer a default elsewhere, NMS Loot (`#nms`) starts off elsewhere, and Ranged style and bow pulls use `/autofire` instead of `#attackmode`. Camping to another server now reloads that server's settings, even with the same character name.
