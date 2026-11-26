@@ -1,4 +1,4 @@
--- moriac/ui_mini.lua: extracted verbatim from moriac.lua (behaviour-preserving split).
+-- moriac_ui_mini.lua: extracted verbatim from moriac.lua (behaviour-preserving split).
 -- Dependencies come in through D (see the init call in moriac.lua); live bindings
 -- that moriac.lua reassigns (ctrl, loadout, ...) are read through D.<name>().
 local M = {}

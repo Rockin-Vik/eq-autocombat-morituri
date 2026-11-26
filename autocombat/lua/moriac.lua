@@ -5867,7 +5867,7 @@ do
     for i = 1, #WP.B64_CHARS do WP.B64_LOOKUP[WP.B64_CHARS:sub(i, i)] = i - 1 end
 end
 
-require('moriac.wp_presets').init(runtime, UI, {
+require('moriac_wp_presets').init(runtime, UI, {
     WP = WP, copyWaypointList = copyWaypointList,
 })
 
@@ -7223,7 +7223,7 @@ function runtime.combatHold()
     return pm ~= nil and pm.combatHold() == true
 end
 
-require('moriac.plugin_manager').init(runtime, UI, {
+require('moriac_plugin_manager').init(runtime, UI, {
     ARC = ARC, CLASS_SLOTS = CLASS_SLOTS, ERR = ERR, GOLD = GOLD,
     GOOD = GOOD, ImGui = ImGui, MUTED = MUTED, VERSION = VERSION,
     WARN = WARN, castTracker = castTracker, classColor = classColor, cleanSpellName = cleanSpellName,
@@ -7235,7 +7235,7 @@ require('moriac.plugin_manager').init(runtime, UI, {
     myClasses = function() return myClasses end, DATA = function() return DATA end, reDetectRequested = function() return reDetectRequested end, set_reDetectRequested = function(v) reDetectRequested = v end,
 })
 
-require('moriac.ui_plugins').init(runtime, UI, {
+require('moriac_ui_plugins').init(runtime, UI, {
     ARC = ARC, ERR = ERR, GOLD = GOLD, GOOD = GOOD,
     ImGui = ImGui, MUTED = MUTED, WARN = WARN, accent = accent,
     ctrl = function() return ctrl end,
@@ -12280,7 +12280,7 @@ function runtime.saveSingleWindow(winKey)
     return true
 end
 
-require('moriac.ui_settings').init(runtime, UI, {
+require('moriac_ui_settings').init(runtime, UI, {
     ARC = ARC, ERR = ERR, GOLD = GOLD, GOOD = GOOD,
     ImGui = ImGui, MUTED = MUTED, WARN = WARN, accent = accent,
     castTracker = castTracker, hasActivePet = hasActivePet, mq = mq, navLoaded = navLoaded,
@@ -12288,7 +12288,7 @@ require('moriac.ui_settings').init(runtime, UI, {
     ctrl = function() return ctrl end,
 })
 
-require('moriac.ui_mini').init(runtime, UI, {
+require('moriac_ui_mini').init(runtime, UI, {
     ARC = ARC, GOLD = GOLD, GOOD = GOOD, ImGui = ImGui,
     MODES = MODES, MUTED = MUTED, VERSION = VERSION, WARN = WARN,
     accent = accent, hasActualNPCXtarget = hasActualNPCXtarget, idxOf = idxOf, isHostileTarget = isHostileTarget,
