@@ -58,7 +58,7 @@ local plugin = {
     hasThread          = false,
 }
 
-local REPO            = 'traylz2000/eq-autocombat-morituri'
+local REPO            = 'Rockin-Vik/eq-autocombat-morituri'
 local RAW_BASE        = 'https://raw.githubusercontent.com/' .. REPO .. '/main/'
 local MANIFEST_URL    = RAW_BASE .. 'update_manifest.txt'
 local FILE_BASE       = RAW_BASE .. 'autocombat/'

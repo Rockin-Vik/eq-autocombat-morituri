@@ -110,6 +110,20 @@ local GOOD              = { 0.37, 0.88, 0.64, 1 }
 local WARN              = { 1.0, 0.72, 0.30, 1 }
 local ERR               = { 0.95, 0.35, 0.35, 1 }
 
+-- Morituri-only server features (#nms, #attackmode, the kratos buff) check
+-- this each time; a global so lua/tac plugins can call it too.
+function MORIAC_IS_MORITURI()
+    for _, get in ipairs({
+        function() return mq.TLO.EverQuest.Server() end,
+        function() return mq.TLO.EverQuest.ServerName() end,
+        function() return mq.TLO.Zone.Server() end,
+    }) do
+        local ok, s = pcall(get)
+        if ok and type(s) == 'string' and s:lower():find('morituri', 1, true) then return true end
+    end
+    return false
+end
+
 -- ============================================================================
 -- Data loading
 -- ============================================================================
@@ -5942,17 +5956,24 @@ end
 -- Per-character loadout file path (multibox-safe). Each client writes ONLY its
 -- own moriac_loadout_<server>_<char>.lua, so different characters never share
 -- (and never overwrite each other's) settings, ignore/pull lists, or zone data.
-function runtime.loadoutFilePath()
+function runtime.currentServer()
     local serverName = ''
     pcall(function() serverName = mq.TLO.EverQuest.ServerName() or '' end)
     if not serverName or serverName == '' then
         pcall(function() serverName = mq.TLO.Zone.Server() or '' end)
     end
-    local tag = (tostring(serverName or '') .. '_' .. tostring(myName or 'unknown')):gsub('[^%w%_-]', '_')
+    return tostring(serverName or '')
+end
+
+function runtime.loadoutFilePath()
+    -- loadedServer = the server the in-memory settings were loaded for, so the
+    -- flush after a camp to another server still writes the old server's file.
+    local tag = ((runtime.loadedServer or runtime.currentServer()) .. '_' .. tostring(myName or 'unknown')):gsub('[^%w%_-]', '_')
     return mq.configDir .. '/moriac_loadout_' .. tag .. '.lua'
 end
 
 function runtime.loadAll()
+    runtime.loadedServer = runtime.currentServer()
     -- Start clean: a character with no saved file must not inherit the
     -- previous character's data (and save it under its own name).
     ALLDATA = {}
@@ -7911,7 +7932,7 @@ function runtime.initPluginManager()
         if savedCfg and savedCfg.enabled ~= nil then
             shouldEnable = savedCfg.enabled
         else
-            shouldEnable = (inst.defaultEnabled ~= false)
+            shouldEnable = pm.defaultEnabledOf(inst)
         end
 
         if shouldEnable then
@@ -7922,6 +7943,17 @@ function runtime.initPluginManager()
         end
 
         return true
+    end
+
+    -- defaultEnabled may be a function, read at every (re)start, so a
+    -- server-dependent default follows a camp to another server.
+    function pm.defaultEnabledOf(inst)
+        local d = inst.defaultEnabled
+        if type(d) == 'function' then
+            local ok, v = pcall(d)
+            return ok and v == true
+        end
+        return d ~= false
     end
 
     function pm.enablePlugin(id)
@@ -8033,7 +8065,7 @@ function runtime.initPluginManager()
                 if savedEnabled ~= nil then
                     shouldEnable = savedEnabled
                 else
-                    shouldEnable = (p.instance.defaultEnabled ~= false)
+                    shouldEnable = pm.defaultEnabledOf(p.instance)
                 end
                 if shouldEnable then
                     pm.enablePlugin(id)
@@ -10420,8 +10452,22 @@ function UI.drawAATab()
         rows = function()
             return UI.cachedRows('aas', table.concat(myClasses or {}, ',') .. tostring(ctrl.aa_purchased_only), function()
                 local out = {}
+                -- Other classes' AAs come after your own, listed only once you own a
+                -- rank: some servers (e.g. Perky Crew's rebirth) sell other-class AAs.
+                local own, order, seen = {}, {}, {}
+                for _, c in ipairs(myClasses) do own[c] = true; order[#order + 1] = c end
+                local others = {}
+                -- Morituri has no other-class AAs, so skip the extra rank checks there.
+                for _, t in ipairs(MORIAC_IS_MORITURI() and {} or { DATA.aas or {}, DATA.aas_extra or {} }) do
+                    for c in pairs(t) do
+                        if not own[c] and not others[c] then others[c] = true; others[#others + 1] = c end
+                    end
+                end
+                table.sort(others)
+                for _, c in ipairs(others) do order[#order + 1] = c end
                 for _, tier in ipairs({ 'short', 'mid', 'burn' }) do
-                    for _, cls in ipairs(myClasses) do
+                    for _, cls in ipairs(order) do
+                      local mine = own[cls]
                       -- aas_extra: AAs the data file only knows from the base
                       -- (NMS) tables, listed only once this character has them.
                       for _, src in ipairs({ { DATA.aas[cls], false }, { (DATA.aas_extra or {})[cls], true } }) do
@@ -10432,9 +10478,11 @@ function UI.drawAATab()
                                 for _, item in ipairs(isTuple and { list } or list) do
                                     local nm = type(item) == 'table' and (item[1] or item.name) or tostring(item)
                                     if type(nm) == 'string' then nm = nm:match('^%s*(.-)%s*$') end
-                                    if type(nm) == 'string' and not tonumber(nm)
-                                        and ((not ctrl.aa_purchased_only and not src[2]) or runtime.hasAA(nm)) then
-                                        out[#out + 1] = { name = nm, cls = cls, info = fmtSec(secNum),
+                                    if type(nm) == 'string' and not tonumber(nm) and (mine or not seen[nm])
+                                        and ((mine and not ctrl.aa_purchased_only and not src[2]) or runtime.hasAA(nm)) then
+                                        seen[nm] = true
+                                        -- An other-class AA is still fired by this character's own class.
+                                        out[#out + 1] = { name = nm, cls = mine and cls or (myClasses[1] or cls), info = fmtSec(secNum),
                                             infoTip = 'Cooldown ' .. fmtSec(secNum) .. ' (' .. tier .. ')',
                                             tooltip = function() runtime.showAATabTooltip(nm, cls, secNum, tier) end }
                                     end
@@ -21015,6 +21063,13 @@ runtime.ATTACKMODE_MAX_ATTEMPTS = 3
 -- still waiting on the server. Callers must already have checked that tid
 -- is a valid hostile in range and that we're not mid-cast.
 function runtime.engageRangedAttack(tid)
+    if not MORIAC_IS_MORITURI() then
+        -- Stock servers fire the bow with /autofire; #attackmode is Morituri-only.
+        runtime.serverAttackMode = 'Ranged'
+        runtime.attackModeRangedUsed = true
+        runtime.ensureRangedAutoAttack(tid)
+        return true
+    end
     if runtime.serverAttackMode ~= 'Ranged' then
         if (os.clock() - (runtime.lastAttackModeCmdAt or 0)) < 1.0 then return false end
         if (runtime.attackModeAttempts or 0) >= runtime.ATTACKMODE_MAX_ATTEMPTS then
@@ -21053,6 +21108,13 @@ end
 -- the chat line.
 runtime.revertAttackModeToMelee = function()
     if runtime.serverAttackMode ~= 'Ranged' and not runtime.attackModeRangedUsed then return end
+    if not MORIAC_IS_MORITURI() then
+        runtime.serverAttackMode = 'Melee'
+        runtime.serverAttackModeAssumed = false
+        runtime.attackModeAttempts = 0
+        if mq.TLO.Me.AutoFire() then mq.cmd('/autofire off') end
+        return
+    end
     if (os.clock() - (runtime.lastAttackModeCmdAt or 0)) < 1.0 then return end
     runtime.lastAttackModeCmdAt = os.clock()
     runtime.serverAttackMode = 'Melee'
@@ -21099,6 +21161,14 @@ end
 -- render callback, so mq.delay is safe) guarantees /attack off is always
 -- immediately followed by /attack on within the same call.
 function runtime.ensureRangedAutoAttack(tid)
+    if not MORIAC_IS_MORITURI() then
+        -- /autofire shoots at the current target, so no retoggle on a target change.
+        runtime.lastRangedAttackTargetId = tid
+        if mq.TLO.Me.AutoFire() then return end -- already firing: nothing to send this tick
+        if mq.TLO.Me.Combat() then mq.cmd('/attack off') end
+        mq.cmd('/autofire on')
+        return
+    end
     if tid ~= runtime.lastRangedAttackTargetId then
         runtime.lastRangedAttackTargetId = tid
         if mq.TLO.Me.Combat() then
@@ -21350,7 +21420,10 @@ end
 -- and revert the server attack mode so the fight's /attack on swings a
 -- weapon (Melee) or nothing is left running at all (Spell).
 function runtime.finishRangedPullTag()
-    if mq.TLO.Me.AutoFire() then mq.cmd('/autofire off') end
+    -- Off Morituri /autofire IS the Ranged stance's attack, so leave it running there.
+    if mq.TLO.Me.AutoFire() and (MORIAC_IS_MORITURI() or (ctrl.combat_style or 'Melee') ~= 'Ranged') then
+        mq.cmd('/autofire off')
+    end
     if (ctrl.combat_style or 'Melee') == 'Ranged' then
         runtime.rangedPullAttackOn = false
         return
@@ -27148,7 +27221,11 @@ local function runMainLoop()
         runtime.doeventsMs = (os.clock() - evT0) * 1000
         runtime.loopStep('character change', function()
         local nm = mq.TLO.Me.CleanName()
-        if nm and nm ~= '' and nm ~= myName then
+        local srv = runtime.currentServer()
+        -- A camp to another server can keep the same character name, so a
+        -- server change also reloads (that server's file and plugin defaults).
+        local serverChanged = runtime.loadedServer ~= nil and srv ~= '' and srv ~= runtime.loadedServer
+        if nm and nm ~= '' and (nm ~= myName or serverChanged) then
             -- Flush the outgoing character's pending (debounced / not yet
             -- detected) changes to ITS file before myName moves on.
             if myName and (runtime.autoDirty or (runtime.lastSig and loadoutSig() ~= runtime.lastSig)) then

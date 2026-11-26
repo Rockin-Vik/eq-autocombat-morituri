@@ -2,6 +2,14 @@
 
 > **Morituri Auto Combat (MoriAC)** is a fork of Triune AutoCombat for Project Morituri. Entries above the upstream `2026-10-11` section are fork changes; everything below them is upstream history.
 
+## 2026-11-25
+
+- **Runs on servers other than Morituri (made for Perky Crew).** Morituri-only server commands now only happen on Morituri: the `/say kratos` timer is no longer a default elsewhere, NMS Loot (`#nms`) starts off elsewhere, and Ranged style and bow pulls use `/autofire` instead of `#attackmode`. Camping to another server now reloads that server's settings, even with the same character name.
+
+- **AAs bought from other classes show on the AAs page.** Once you own a rank, an activated AA listed under another class in the data file appears with your own AAs (for servers that sell other-class AAs, such as Perky Crew's rebirth).
+
+- **Updates now come from Rockin-Vik/eq-autocombat-morituri.**
+
 ## 2026-11-23
 
 - **Melee no longer creeps up on a mob one step at a time.** When the game said "Your target is too far away", MoriAC only moved 8 units closer and then forgot about it, so the approach to the next mob stopped short again. The result was step, swing, "too far away", step... This hit big mobs most, because their approach distance comes from the size the game reports for them. Now the first "too far away" moves you straight to just inside your **Melee distance**, and MoriAC keeps that shorter reach for that mob (for 10 minutes), so it doesn't stop short again. If the game still says too far, it moves 4 units closer each time.

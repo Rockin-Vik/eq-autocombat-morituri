@@ -35,10 +35,14 @@ local core  = nil
 local mq    = nil
 local ImGui = nil
 
+local function kratosEntry()
+    return { name = 'Kratos buff', command = '/say kratos', minutes = 10, enabled = true, when = 'always', onLoad = true }
+end
+
+-- "kratos" is a Morituri-only NPC buff; other servers start with no timers.
 local function defaultEntries()
-    return {
-        { name = 'Kratos buff', command = '/say kratos', minutes = 10, enabled = true, when = 'always', onLoad = true },
-    }
+    if MORIAC_IS_MORITURI ~= nil and MORIAC_IS_MORITURI() then return { kratosEntry() } end
+    return {}
 end
 
 -- Persisted through onSaveSettings / onLoadSettings (per character loadout).
@@ -46,6 +50,7 @@ local cfg = {
     entries = defaultEntries(),
     echo    = true,        -- a chat line each time one runs
 }
+local seededFor = nil      -- "server/char" cfg.entries was last defaulted for
 
 -- Session state (never persisted)
 local st = {
@@ -159,6 +164,16 @@ function plugin.onInit(coreApi)
     core = coreApi
     mq = core.mq
     ImGui = core.ImGui
+    -- Re-seed only for a new character or server (onLoadSettings then applies a
+    -- saved list), so an off/on toggle keeps edits not yet autosaved.
+    local ok, key = pcall(function()
+        return tostring(mq.TLO.EverQuest.ServerName()) .. '/' .. tostring(mq.TLO.Me.CleanName())
+    end)
+    key = ok and key or ''
+    if key ~= seededFor then
+        seededFor = key
+        cfg.entries = defaultEntries()
+    end
     st.nextAt = {}
 end
 
@@ -300,7 +315,7 @@ function plugin.onDrawSettings()
             if (commandLine(e.command) or ''):lower() == '/say kratos' then have = true end
         end
         if not have and #cfg.entries < MAX_ENTRIES then
-            cfg.entries[#cfg.entries + 1] = defaultEntries()[1]
+            cfg.entries[#cfg.entries + 1] = kratosEntry()
             st.selected = #cfg.entries
             saveSettings()
         end

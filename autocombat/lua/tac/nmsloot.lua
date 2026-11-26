@@ -61,7 +61,8 @@ local plugin = {
     version            = '1.0.0',
     author             = 'MoriAC',
     description        = 'Personal loot (#nms) console: shows which box holds the active looter slot, moves it between boxes over the Box Network, lists and acts on the items offered to any box.',
-    defaultEnabled     = true,
+    -- #nms is a Morituri server command; off by default elsewhere.
+    defaultEnabled     = function() return MORIAC_IS_MORITURI ~= nil and MORIAC_IS_MORITURI() end,
     tickInterval       = 0.1,
     runOutOfCombatOnly = false,
     hasThread          = false,
