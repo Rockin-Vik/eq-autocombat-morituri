@@ -223,8 +223,21 @@ end
 
 -- Write every <dest>.new, then swap each in (old copy -> <dest>.bak).
 -- items: { {dest, body, path} }. Returns true, count or false, reason.
+-- Create the parent folder of dest (e.g. lua/moriac/ for a new module) when it
+-- is missing, via LuaFileSystem. Best effort: io.open below reports failure.
+local function ensureParentDir(dest)
+    local dir = dest:match('^(.*)[/\][^/\]+$')
+    if not dir or dir == '' then return end
+    local okL, lfs = pcall(require, 'lfs')
+    if not (okL and lfs and lfs.attributes and lfs.mkdir) then return end
+    local okA, mode = pcall(lfs.attributes, dir, 'mode')
+    if okA and mode == 'directory' then return end
+    pcall(lfs.mkdir, dir)
+end
+
 local function applyFiles(items)
     for i, it in ipairs(items) do
+        ensureParentDir(it.dest)
         local h = io.open(it.dest .. '.new', 'wb')
         local ok = h and h:write(it.body)
         if h then h:close() end
